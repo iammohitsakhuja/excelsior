@@ -1,0 +1,19 @@
+{
+    "github.copilot.chat.commitMessageGeneration.instructions": [
+        {
+            "text": "Generate a commit message for the staged changes following conventional-changelog angular style. Use the format: type(scope): description. Valid types include: build, ci, docs, feat, fix, perf, refactor, style, test, chore. Focus on the key modifications and their purpose, avoiding unnecessary details. If the changes are complex or significant, also provide a commit description explaining the reasoning or impact."
+        }
+    ],
+    "github.copilot.chat.agent.thinkingTool": true,
+    "makefile.configureOnOpen": false,
+    "[python]": {
+        "editor.rulers": [88]
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}
