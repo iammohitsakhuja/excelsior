@@ -239,7 +239,7 @@ $RECYCLE.BIN/
 .bw-session
 bw-session.txt
 
-# Password analysis reports
+# File analysis reports
 reports/
 *.report
 *.analysis
