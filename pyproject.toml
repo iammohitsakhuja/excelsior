@@ -1,0 +1,116 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "excelsior"
+version = "0.1.0"
+description = "Python scripts for Excel and CSV file operations"
+readme = "docs/README.md"
+license = {file = "LICENSE.md"}
+authors = [
+    {name = "Mohit Sakhuja", email = "sakhuja.mohit@gmail.com"}
+]
+requires-python = ">=3.10"
+classifiers = []
+dependencies = [
+    "pandas>=2.3.0",
+    "openpyxl>=3.1.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.1",
+    "pytest-cov==6.2.1",
+    "pytest-mock==3.14.1",
+    "ruff==0.12.5",
+]
+
+[project.scripts]
+excelsior = "excelsior.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/iammohitsakhuja/excelsior"
+Repository = "https://github.com/iammohitsakhuja/excelsior"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/excelsior"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+]
+ignore = [
+    # Line too long (handled by formatter)
+    "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["excelsior"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+# Test discovery
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Output and behavior configuration
+addopts = [
+    "-v",                    # Verbose output
+    "--tb=short",           # Shorter traceback format
+    "--strict-markers",     # Strict marker handling
+    "--strict-config",      # Strict config handling
+    "--color=yes",          # Colored output
+    "--durations=10",       # Show 10 slowest tests
+    "--failed-first",       # Run failed tests first
+]
+
+# Custom markers for test categorization
+markers = [
+    "unit: Unit tests that test individual components in isolation",
+    "integration: Integration tests that test component interactions",
+    "cli: Tests that exercise the CLI interface",
+    "slow: Tests that are known to be slow",
+]
+
+# Filter out common warnings
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# Minimum pytest version
+minversion = "8.0"
+
+[tool.coverage.run]
+branch = true
+source = ["src/excelsior"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
