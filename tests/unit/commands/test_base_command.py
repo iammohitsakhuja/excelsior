@@ -57,7 +57,7 @@ class TestBaseCommand:
     def test_base_command_is_abstract(self):
         """Test that BaseCommand cannot be instantiated directly."""
         with pytest.raises(TypeError):
-            BaseCommand()  # pyright: ignore[reportAbstractUsage]
+            BaseCommand()  # type: ignore
 
     def test_concrete_command_implementation(self, test_command_class):
         """Test that a concrete command implementation works correctly."""

@@ -231,7 +231,7 @@ class TestSplitCommandIntegration:
             )
 
             assert result.returncode == 2  # argparse error exit code
-            assert "Invalid keys" in result.stderr
+            assert "Extra inputs are not permitted" in result.stderr
             assert "invalid_key" in result.stderr
         finally:
             tmp_file_path.unlink()

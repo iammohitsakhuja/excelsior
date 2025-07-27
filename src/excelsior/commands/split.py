@@ -4,7 +4,10 @@ import argparse
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from excelsior.commands.base import FileProcessingCommand
+from excelsior.schemas.split import SplitSheetConfigSchema
 from excelsior.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -52,7 +55,7 @@ def validate_file_path(value: str) -> Path:
 
 
 def validate_sheet_config(value: str) -> Path:
-    """Validate that the sheet config file exists and is a valid JSON file.
+    """Validate that the sheet config file exists and is a valid JSON file with correct schema.
 
     Args:
         value: String path to the JSON config file
@@ -61,7 +64,7 @@ def validate_sheet_config(value: str) -> Path:
         Path: The validated config file path
 
     Raises:
-        argparse.ArgumentTypeError: If the file doesn't exist or isn't valid JSON
+        argparse.ArgumentTypeError: If the file doesn't exist, isn't valid JSON, or doesn't match schema
     """
     path = Path(value)
     if not path.exists():
@@ -69,44 +72,29 @@ def validate_sheet_config(value: str) -> Path:
     if not path.is_file():
         raise argparse.ArgumentTypeError(f"Sheet config path is not a file: {path}")
 
-    # Validate JSON format
+    # Validate JSON format and schema
     try:
         with open(path, encoding="utf-8") as f:
-            config = json.load(f)
+            config_data = json.load(f)
 
-        # Basic validation of config structure
-        if not isinstance(config, dict):
-            raise argparse.ArgumentTypeError(
-                "Sheet config must be a JSON object (dictionary)"
-            )
-
-        # Validate each sheet configuration
-        for sheet_name, sheet_config in config.items():
-            if not isinstance(sheet_config, dict):
-                raise argparse.ArgumentTypeError(
-                    f"Configuration for sheet '{sheet_name}' must be an object"
-                )
-
-            # Check for valid keys
-            valid_keys = {"date_column", "date_format", "include"}
-            invalid_keys = set(sheet_config.keys()) - valid_keys
-            if invalid_keys:
-                raise argparse.ArgumentTypeError(
-                    f"Invalid keys in sheet '{sheet_name}' config: {invalid_keys}. "
-                    f"Valid keys are: {valid_keys}"
-                )
-
-            # Validate include flag if present
-            if "include" in sheet_config and not isinstance(
-                sheet_config["include"], bool
-            ):
-                raise argparse.ArgumentTypeError(
-                    f"'include' flag for sheet '{sheet_name}' must be a boolean"
-                )
+        # Validate using Pydantic schema
+        SplitSheetConfigSchema(config_data)
 
     except json.JSONDecodeError as e:
         raise argparse.ArgumentTypeError(
             f"Invalid JSON in sheet config file: {e}"
+        ) from e
+    except ValidationError as e:
+        # Format Pydantic validation errors for user-friendly display
+        error_messages = []
+        for error in e.errors():
+            location = " -> ".join(str(loc) for loc in error["loc"])
+            message = error["msg"]
+            error_messages.append(f"  {location}: {message}")
+
+        formatted_errors = "\n".join(error_messages)
+        raise argparse.ArgumentTypeError(
+            f"Invalid sheet configuration:\n{formatted_errors}"
         ) from e
     except Exception as e:
         raise argparse.ArgumentTypeError(f"Error reading sheet config file: {e}") from e
