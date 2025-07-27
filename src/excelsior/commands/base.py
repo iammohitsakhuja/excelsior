@@ -76,7 +76,10 @@ class BaseCommand(ABC):
         Returns:
             Optional[str]: Error message if validation fails, None if successful
         """
-        return None
+        # Check logging args first
+        logging_error = self._validate_logging_args(args)
+        if logging_error:
+            return logging_error
 
     def register(self, subparsers: argparse._SubParsersAction) -> None:
         """Register this command with the main CLI parser.
@@ -97,6 +100,42 @@ class BaseCommand(ABC):
 
         # Set the function to call when this command is used
         parser.set_defaults(func=self._execute_with_validation)
+
+    def _add_common_command_arguments(self, parser: argparse.ArgumentParser) -> None:
+        """Add common command arguments.
+
+        Args:
+            parser: The argument parser to add arguments to
+        """
+        # Logging options (common to all commands)
+        logging_group = parser.add_argument_group("logging options")
+
+        logging_group.add_argument(
+            "--verbose",
+            "-v",
+            action="store_true",
+            help="Enable detailed logging output",
+        )
+
+        logging_group.add_argument(
+            "--quiet",
+            "-q",
+            action="store_true",
+            help="Suppress all but error messages",
+        )
+
+    def _validate_logging_args(self, args: argparse.Namespace) -> str | None:
+        """Validate logging arguments.
+
+        Args:
+            args: Parsed command line arguments
+
+        Returns:
+            Optional[str]: Error message if validation fails, None if successful
+        """
+        if getattr(args, "verbose", False) and getattr(args, "quiet", False):
+            return "Cannot use --verbose and --quiet together"
+        return None
 
     def _execute_with_validation(self, args: argparse.Namespace) -> int:
         """Internal method that handles validation before executing the command.
@@ -160,39 +199,3 @@ class FileProcessingCommand(BaseCommand):
                 f"Supported formats: {', '.join(supported_extensions)}"
             )
         return path
-
-    def add_common_file_arguments(self, parser: argparse.ArgumentParser) -> None:
-        """Add common file processing arguments.
-
-        Args:
-            parser: The argument parser to add arguments to
-        """
-        # Logging options (common to all commands)
-        logging_group = parser.add_argument_group("logging options")
-
-        logging_group.add_argument(
-            "--verbose",
-            "-v",
-            action="store_true",
-            help="Enable detailed logging output",
-        )
-
-        logging_group.add_argument(
-            "--quiet",
-            "-q",
-            action="store_true",
-            help="Suppress all but error messages",
-        )
-
-    def validate_logging_args(self, args: argparse.Namespace) -> str | None:
-        """Validate logging arguments.
-
-        Args:
-            args: Parsed command line arguments
-
-        Returns:
-            Optional[str]: Error message if validation fails, None if successful
-        """
-        if getattr(args, "verbose", False) and getattr(args, "quiet", False):
-            return "Cannot use --verbose and --quiet together"
-        return None
