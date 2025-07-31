@@ -7,8 +7,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from excelsior.commands.base import FileProcessingCommand
-from excelsior.schemas.split import SplitSheetConfigSchema
-from excelsior.utils.logger import get_logger
+from excelsior.schemas import SplitSheetConfigSchema
+from excelsior.utils import (
+    DataLoadError,
+    DataProcessor,
+    SheetConfigError,
+    SheetConfigProcessor,
+    get_logger,
+)
 
 logger = get_logger(__name__)
 
@@ -311,13 +317,6 @@ Output File Naming:
         Returns:
             int: Exit code (0 for success, non-zero for error)
         """
-        from excelsior.utils.data_processor import (
-            DataLoadError,
-            DataProcessor,
-            SheetConfigError,
-            SheetConfigProcessor,
-        )
-
         self.logger.info("Starting split command")
 
         try:
@@ -390,6 +389,7 @@ Output File Naming:
             # Resolve configurations for each sheet
             resolved_configs = sheet_processor.resolve_sheet_configs(
                 sheet_names=selected_sheets,
+                sheet_data=file_data,
                 global_date_column=args.date_column,
                 global_date_format=args.date_format,
                 sheet_config=sheet_config,

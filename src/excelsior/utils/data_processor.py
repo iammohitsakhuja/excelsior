@@ -6,7 +6,11 @@ from pathlib import Path
 import pandas as pd
 from pydantic import ValidationError
 
-from excelsior.schemas.split import SheetConfig, SplitSheetConfigSchema
+from excelsior.schemas import SheetConfig, SplitSheetConfigSchema
+from excelsior.utils.date_format_detector import (
+    DateFormatDetectionError,
+    DateFormatDetector,
+)
 from excelsior.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -174,6 +178,7 @@ class SheetConfigProcessor:
     def __init__(self):
         """Initialize the sheet config processor."""
         self.logger = get_logger(self.__class__.__module__)
+        self.date_format_detector = DateFormatDetector()
 
     def load_sheet_config(self, config_path: Path) -> SplitSheetConfigSchema:
         """Load and validate sheet configuration from JSON file.
@@ -337,6 +342,7 @@ class SheetConfigProcessor:
     def resolve_sheet_configs(
         self,
         sheet_names: list[str],
+        sheet_data: dict[str, pd.DataFrame] | None = None,
         global_date_column: str | None = None,
         global_date_format: str | None = None,
         sheet_config: SplitSheetConfigSchema | None = None,
@@ -345,6 +351,7 @@ class SheetConfigProcessor:
 
         Args:
             sheet_names: List of sheet names to process
+            sheet_data: Dictionary mapping sheet names to DataFrames (for date format detection)
             global_date_column: Global date column from command line
             global_date_format: Global date format from command line
             sheet_config: Sheet-specific configurations
@@ -380,6 +387,22 @@ class SheetConfigProcessor:
                     f"No date column specified for sheet '{sheet_name}'. "
                     f"Provide either --date-column or configure it in sheet config."
                 )
+
+            # Detect date format if not provided and we have access to the data
+            if (
+                not config_dict.get("date_format")
+                and sheet_data is not None
+                and sheet_name in sheet_data
+            ):
+                try:
+                    detected_format = self.date_format_detector.detect_date_format(
+                        sheet_data[sheet_name], config_dict["date_column"]
+                    )
+                    if detected_format:
+                        config_dict["date_format"] = detected_format
+                except DateFormatDetectionError as e:
+                    # Convert to SheetConfigError to maintain API compatibility
+                    raise SheetConfigError(str(e)) from e
 
             # Create the configuration
             resolved_configs[sheet_name] = SheetConfig(**config_dict)

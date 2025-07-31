@@ -7,8 +7,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from excelsior.schemas.split import SplitSheetConfigSchema
-from excelsior.utils.data_processor import (
+from excelsior.schemas import SplitSheetConfigSchema
+from excelsior.utils import (
     DataLoadError,
     DataProcessor,
     SheetConfigError,
@@ -311,3 +311,203 @@ class TestSheetConfigProcessor:
             processor.resolve_sheet_configs(sheet_names)
 
         assert "No date column specified for sheet 'Sheet1'" in str(exc_info.value)
+
+    def test_resolve_sheet_configs_with_date_format_detection(self):
+        """Test config resolution with automatic date format detection."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        # Create test data with ISO date format
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "Date": ["2024-01-15", "2024-02-20", "2024-03-10"],
+                    "Amount": [100, 200, 300],
+                }
+            )
+        }
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=sheet_data,
+            global_date_column="Date",
+        )
+
+        # Should detect ISO format
+        assert result["Sheet1"].date_column == "Date"
+        assert result["Sheet1"].date_format == "%Y-%m-%d"
+
+    def test_resolve_sheet_configs_date_detection_us_format(self):
+        """Test date format detection for US format (MM/DD/YYYY)."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        # Create test data with US date format
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "Date": ["01/15/2024", "02/20/2024", "03/10/2024"],
+                    "Amount": [100, 200, 300],
+                }
+            )
+        }
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=sheet_data,
+            global_date_column="Date",
+        )
+
+        # Should detect US format
+        assert result["Sheet1"].date_column == "Date"
+        assert result["Sheet1"].date_format == "%m/%d/%Y"
+
+    def test_resolve_sheet_configs_date_detection_european_format(self):
+        """Test date format detection for European format (DD/MM/YYYY)."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        # Create test data with European date format (using dates that are unambiguous)
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "Date": ["15/01/2024", "20/02/2024", "25/03/2024"],
+                    "Amount": [100, 200, 300],
+                }
+            )
+        }
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=sheet_data,
+            global_date_column="Date",
+        )
+
+        # Should detect European format
+        assert result["Sheet1"].date_column == "Date"
+        assert result["Sheet1"].date_format == "%d/%m/%Y"
+
+    def test_resolve_sheet_configs_date_detection_with_datetime(self):
+        """Test date format detection for datetime format."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        # Create test data with datetime format
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "DateTime": [
+                        "2024-01-15 14:30:00",
+                        "2024-02-20 09:15:30",
+                        "2024-03-10 16:45:00",
+                    ],
+                    "Amount": [100, 200, 300],
+                }
+            )
+        }
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=sheet_data,
+            global_date_column="DateTime",
+        )
+
+        # Should detect datetime format
+        assert result["Sheet1"].date_column == "DateTime"
+        assert result["Sheet1"].date_format == "%Y-%m-%d %H:%M:%S"
+
+    def test_resolve_sheet_configs_date_detection_mixed_formats_fails(self):
+        """Test that mixed date formats result in detection failure with helpful error."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        # Create test data with mixed date formats
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "Date": ["2024-01-15", "02/20/2024", "25.03.2024"],
+                    "Amount": [100, 200, 300],
+                }
+            )
+        }
+
+        # Should raise an error due to mixed formats
+        with pytest.raises(SheetConfigError) as exc_info:
+            processor.resolve_sheet_configs(
+                sheet_names,
+                sheet_data=sheet_data,
+                global_date_column="Date",
+            )
+
+        error_message = str(exc_info.value)
+        assert "Inconsistent date formats detected" in error_message
+        assert "Detected format '%Y-%m-%d'" in error_message
+        assert "02/20/2024" in error_message
+        assert "25.03.2024" in error_message
+
+    def test_resolve_sheet_configs_explicit_format_overrides_detection(self):
+        """Test that explicit format specification overrides auto-detection."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        # Create test data with ISO format
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "Date": ["2024-01-15", "2024-02-20", "2024-03-10"],
+                    "Amount": [100, 200, 300],
+                }
+            )
+        }
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=sheet_data,
+            global_date_column="Date",
+            global_date_format="%Y-%m-%d",  # Explicit format
+        )
+
+        # Should use explicit format, not detected format
+        assert result["Sheet1"].date_column == "Date"
+        assert result["Sheet1"].date_format == "%Y-%m-%d"
+
+    def test_resolve_sheet_configs_detection_without_data(self):
+        """Test that detection is skipped when no sheet data is provided."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1"]
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=None,  # No data provided
+            global_date_column="Date",
+        )
+
+        # Should not have detected format
+        assert result["Sheet1"].date_column == "Date"
+        assert result["Sheet1"].date_format is None
+
+    def test_resolve_sheet_configs_detection_missing_sheet_data(self):
+        """Test behavior when sheet data is missing for specific sheet."""
+        processor = SheetConfigProcessor()
+        sheet_names = ["Sheet1", "Sheet2"]
+
+        # Provide data only for Sheet1
+        sheet_data = {
+            "Sheet1": pd.DataFrame(
+                {
+                    "Date": ["2024-01-15", "2024-02-20"],
+                    "Amount": [100, 200],
+                }
+            )
+        }
+
+        result = processor.resolve_sheet_configs(
+            sheet_names,
+            sheet_data=sheet_data,
+            global_date_column="Date",
+        )
+
+        # Sheet1 should have detected format
+        assert result["Sheet1"].date_format == "%Y-%m-%d"
+        # Sheet2 should not have format (no data provided)
+        assert result["Sheet2"].date_format is None
