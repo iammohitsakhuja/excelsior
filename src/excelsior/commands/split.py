@@ -142,7 +142,7 @@ Examples:
   excelsior split -f financial_data.xlsx -d "Transaction Date" -i financial-year -fys 7
 
   # Split specific sheets in an Excel file
-  excelsior split -f multi_sheet_data.xlsx -d "Date" -s "Sales" "Expenses"
+  excelsior split -f multi_sheet_data.xlsx -d "Date" --include "Sales" "Expenses"
 
   # Split with sheet-specific configuration
   excelsior split -f complex_data.xlsx -sc sheet_config.json
@@ -235,21 +235,24 @@ Output File Naming:
         excel_group = parser.add_argument_group("Excel-specific options")
 
         excel_group.add_argument(
-            "--sheets",
-            "-s",
+            "--include",
+            "-inc",
             nargs="+",
             help=(
                 "List of sheet names to process (Excel only). "
-                "If not specified, all sheets will be processed"
+                "Cannot be used with --exclude or --sheet-config"
             ),
             metavar="SHEET",
         )
 
         excel_group.add_argument(
-            "--exclude-sheets",
-            "-xs",
+            "--exclude",
+            "-exc",
             nargs="+",
-            help="List of sheet names to exclude from processing (Excel only)",
+            help=(
+                "List of sheet names to exclude from processing (Excel only). "
+                "Cannot be used with --include or --sheet-config"
+            ),
             metavar="SHEET",
         )
 
@@ -285,13 +288,17 @@ Output File Naming:
         if not args.date_column and not args.sheet_config:
             return "Either --date-column or --sheet-config must be provided"
 
-        if args.sheets and args.exclude_sheets:
-            # Check for overlap between sheets and exclude_sheets
-            include_set = set(args.sheets)
-            exclude_set = set(args.exclude_sheets)
-            overlap = include_set & exclude_set
-            if overlap:
-                return f"Cannot both include and exclude the same sheets: {overlap}"
+        # Check mutual exclusivity of sheet selection flags
+        active_flags = []
+        if args.include:
+            active_flags.append("--include")
+        if args.exclude:
+            active_flags.append("--exclude")
+        if args.sheet_config:
+            active_flags.append("--sheet-config")
+
+        if len(active_flags) > 1:
+            return f"Cannot use multiple sheet selection flags together: {', '.join(active_flags)}"
 
         return None
 
@@ -304,34 +311,113 @@ Output File Naming:
         Returns:
             int: Exit code (0 for success, non-zero for error)
         """
+        from excelsior.utils.data_processor import (
+            DataLoadError,
+            DataProcessor,
+            SheetConfigError,
+            SheetConfigProcessor,
+        )
+
         self.logger.info("Starting split command")
 
-        # Check if file is CSV and Excel-specific options are used
-        if args.file.suffix.lower() == ".csv":
-            excel_options = []
-            if args.sheets:
-                excel_options.append("--sheets")
-            if args.exclude_sheets:
-                excel_options.append("--exclude-sheets")
-            if args.sheet_config:
-                excel_options.append("--sheet-config")
+        try:
+            # Check if file is CSV and Excel-specific options are used
+            if args.file.suffix.lower() == ".csv":
+                excel_options = []
+                if args.include:
+                    excel_options.append("--include")
+                if args.exclude:
+                    excel_options.append("--exclude")
+                if args.sheet_config:
+                    excel_options.append("--sheet-config")
 
-            if excel_options:
-                self.logger.warning(
-                    f"Excel-specific options {excel_options} will be ignored for CSV file"
+                if excel_options:
+                    self.logger.warning(
+                        f"Excel-specific options {excel_options} will be ignored for CSV file"
+                    )
+
+            self.logger.info(f"Input file: {args.file}")
+            self.logger.info(f"Date column: {args.date_column}")
+            self.logger.info(f"Split interval: {args.interval}")
+            self.logger.info(f"Output directory: {args.output_dir}")
+
+            if args.interval == "financial-year":
+                self.logger.info(
+                    f"Financial year starts in month: {args.financial_year_start}"
                 )
 
-        self.logger.info(f"Input file: {args.file}")
-        self.logger.info(f"Date column: {args.date_column}")
-        self.logger.info(f"Split interval: {args.interval}")
-        self.logger.info(f"Output directory: {args.output_dir}")
+            # Initialize processors
+            data_processor = DataProcessor()
+            sheet_processor = SheetConfigProcessor()
 
-        if args.interval == "financial-year":
-            self.logger.info(
-                f"Financial year starts in month: {args.financial_year_start}"
+            # Load sheet configuration if provided
+            sheet_config = None
+            if args.sheet_config:
+                self.logger.info("Loading sheet configuration")
+                sheet_config = sheet_processor.load_sheet_config(args.sheet_config)
+
+            # Load the input file
+            self.logger.info("Loading input file")
+            file_data = data_processor.load_file(args.file)
+
+            # Determine which sheets to process
+            if isinstance(file_data, dict):
+                # Excel file - multiple sheets
+                available_sheets = list(file_data.keys())
+                self.logger.info(f"Excel file contains sheets: {available_sheets}")
+
+                selected_sheets = sheet_processor.process_sheet_selection(
+                    available_sheets=available_sheets,
+                    include_sheets=args.include,
+                    exclude_sheets=args.exclude,
+                    sheet_config=sheet_config,
+                )
+            else:
+                # CSV file - single "sheet"
+                # For CSV files with sheet config, use the first configured sheet name if only one exists
+                if sheet_config and len(sheet_config.keys()) == 1:
+                    csv_sheet_name = list(sheet_config.keys())[0]
+                    self.logger.info(
+                        f"Using sheet config name '{csv_sheet_name}' for CSV file"
+                    )
+                else:
+                    csv_sheet_name = "CSV"
+                    self.logger.info("Processing CSV file as single sheet")
+
+                selected_sheets = [csv_sheet_name]
+                file_data = {csv_sheet_name: file_data}
+
+            # Resolve configurations for each sheet
+            resolved_configs = sheet_processor.resolve_sheet_configs(
+                sheet_names=selected_sheets,
+                global_date_column=args.date_column,
+                global_date_format=args.date_format,
+                sheet_config=sheet_config,
             )
 
-        # TODO: Implement the actual splitting logic
-        self.logger.info("Split command execution completed successfully")
+            # Validate date columns in each sheet
+            for sheet_name in selected_sheets:
+                sheet_data = file_data[sheet_name]
+                config = resolved_configs[sheet_name]
 
-        return 0
+                self.logger.info(f"Validating date column for sheet '{sheet_name}'")
+                # date_column is guaranteed to be not None by resolve_sheet_configs
+                assert config.date_column is not None
+                data_processor.validate_date_column(sheet_data, config.date_column)
+
+            self.logger.info(
+                "File loading and configuration processing completed successfully"
+            )
+
+            # TODO: Implement date parsing and splitting logic
+            self.logger.info("Date parsing and splitting logic not yet implemented")
+
+            self.logger.info("Split command execution completed successfully")
+            return 0
+
+        except (DataLoadError, SheetConfigError) as e:
+            self.logger.error(f"Split command failed: {str(e)}")
+            return 1
+        except Exception as e:
+            self.logger.error(f"Unexpected error in split command: {str(e)}")
+            return 1

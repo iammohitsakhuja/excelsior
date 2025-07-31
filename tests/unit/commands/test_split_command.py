@@ -102,10 +102,10 @@ class TestSplitCommandRegistration:
                     "/tmp/output",
                     "--date-format",
                     "%Y-%m-%d",
-                    "--sheets",
+                    "--include",
                     "Sheet1",
                     "Sheet2",
-                    "--exclude-sheets",
+                    "--exclude",
                     "Sheet3",
                     "--sheet-config",
                     str(tmp_config_path),
@@ -120,8 +120,8 @@ class TestSplitCommandRegistration:
             assert args.financial_year_start == 7
             assert args.output_dir == Path("/tmp/output")
             assert args.date_format == "%Y-%m-%d"
-            assert args.sheets == ["Sheet1", "Sheet2"]
-            assert args.exclude_sheets == ["Sheet3"]
+            assert args.include == ["Sheet1", "Sheet2"]
+            assert args.exclude == ["Sheet3"]
             assert args.sheet_config == tmp_config_path
             assert args.verbose is True
             assert args.quiet is False
@@ -139,8 +139,8 @@ class TestSplitCommandArgumentValidation:
         args = argparse.Namespace(
             date_column=None,
             sheet_config=None,
-            sheets=None,
-            exclude_sheets=None,
+            include=None,
+            exclude=None,
             verbose=False,
             quiet=False,
         )
@@ -148,30 +148,131 @@ class TestSplitCommandArgumentValidation:
         error = command.validate_args(args)
         assert error == "Either --date-column or --sheet-config must be provided"
 
-    def test_validate_args_sheets_exclude_sheets_overlap(self):
-        """Test validation when sheets and exclude_sheets have overlap."""
+    def test_validate_args_include_exclude_conflict(self):
+        """Test validation when both --include and --exclude are used."""
         command = SplitCommand()
         args = argparse.Namespace(
             date_column="Date",
             sheet_config=None,
-            sheets=["Sheet1", "Sheet2"],
-            exclude_sheets=["Sheet2", "Sheet3"],
+            include=["Sheet1"],
+            exclude=["Sheet2"],
             verbose=False,
             quiet=False,
         )
 
         error = command.validate_args(args)
-        assert error is not None
-        assert "Cannot both include and exclude the same sheets: {'Sheet2'}" in error
+        assert (
+            error
+            == "Cannot use multiple sheet selection flags together: --include, --exclude"
+        )
 
-    def test_validate_args_valid_combination(self):
-        """Test validation with valid argument combinations."""
+    def test_validate_args_include_sheet_config_conflict(self):
+        """Test validation when both --include and --sheet-config are used."""
+        command = SplitCommand()
+        args = argparse.Namespace(
+            date_column=None,
+            sheet_config="/path/to/config.json",
+            include=["Sheet1"],
+            exclude=None,
+            verbose=False,
+            quiet=False,
+        )
+
+        error = command.validate_args(args)
+        assert (
+            error
+            == "Cannot use multiple sheet selection flags together: --include, --sheet-config"
+        )
+
+    def test_validate_args_exclude_sheet_config_conflict(self):
+        """Test validation when both --exclude and --sheet-config are used."""
+        command = SplitCommand()
+        args = argparse.Namespace(
+            date_column=None,
+            sheet_config="/path/to/config.json",
+            include=None,
+            exclude=["Sheet1"],
+            verbose=False,
+            quiet=False,
+        )
+
+        error = command.validate_args(args)
+        assert (
+            error
+            == "Cannot use multiple sheet selection flags together: --exclude, --sheet-config"
+        )
+
+    def test_validate_args_all_three_flags_conflict(self):
+        """Test validation when all three sheet selection flags are used."""
+        command = SplitCommand()
+        args = argparse.Namespace(
+            date_column=None,
+            sheet_config="/path/to/config.json",
+            include=["Sheet1"],
+            exclude=["Sheet2"],
+            verbose=False,
+            quiet=False,
+        )
+
+        error = command.validate_args(args)
+        assert (
+            error
+            == "Cannot use multiple sheet selection flags together: --include, --exclude, --sheet-config"
+        )
+
+    def test_validate_args_valid_include_only(self):
+        """Test validation with only --include flag."""
         command = SplitCommand()
         args = argparse.Namespace(
             date_column="Date",
             sheet_config=None,
-            sheets=["Sheet1"],
-            exclude_sheets=["Sheet2"],
+            include=["Sheet1", "Sheet2"],
+            exclude=None,
+            verbose=False,
+            quiet=False,
+        )
+
+        error = command.validate_args(args)
+        assert error is None
+
+    def test_validate_args_valid_exclude_only(self):
+        """Test validation with only --exclude flag."""
+        command = SplitCommand()
+        args = argparse.Namespace(
+            date_column="Date",
+            sheet_config=None,
+            include=None,
+            exclude=["Sheet3"],
+            verbose=False,
+            quiet=False,
+        )
+
+        error = command.validate_args(args)
+        assert error is None
+
+    def test_validate_args_valid_sheet_config_only(self):
+        """Test validation with only --sheet-config flag."""
+        command = SplitCommand()
+        args = argparse.Namespace(
+            date_column=None,
+            sheet_config="/path/to/config.json",
+            include=None,
+            exclude=None,
+            verbose=False,
+            quiet=False,
+        )
+
+        error = command.validate_args(args)
+        assert error is None
+
+    def test_validate_args_valid_no_sheet_flags(self):
+        """Test validation with no sheet selection flags (default behavior)."""
+        command = SplitCommand()
+        args = argparse.Namespace(
+            date_column="Date",
+            sheet_config=None,
+            include=None,
+            exclude=None,
             verbose=False,
             quiet=False,
         )

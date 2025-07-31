@@ -26,6 +26,8 @@ class TestSplitCommandIntegration:
         assert "--interval" in result.stdout
         assert "--output-dir" in result.stdout
         assert "--financial-year-start" in result.stdout
+        assert "--include" in result.stdout
+        assert "--exclude" in result.stdout
         assert "--sheet-config" in result.stdout
 
     def test_split_missing_date_column(self):
@@ -319,3 +321,245 @@ class TestSplitCommandIntegration:
                 assert "Starting split command" in result.stderr
             finally:
                 tmp_path.unlink()
+
+    def test_split_include_exclude_flag_conflict(self):
+        """Test that using both --include and --exclude flags causes an error."""
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            tmp.write("Date,Amount\n2024-01-01,100.00\n")
+            tmp_path = Path(tmp.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--include",
+                    "Sheet1",
+                    "--exclude",
+                    "Sheet2",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 1
+            assert "Cannot use multiple sheet selection flags together" in result.stderr
+            assert "--include" in result.stderr
+            assert "--exclude" in result.stderr
+        finally:
+            tmp_path.unlink()
+
+    def test_split_include_sheet_config_flag_conflict(self):
+        """Test that using both --include and --sheet-config flags causes an error."""
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as tmp_file:
+            tmp_file.write("Date,Amount\n2024-01-01,100.00\n")
+            tmp_file_path = Path(tmp_file.name)
+
+        # Create a temporary config file
+        config_data = {"Sheet1": {"date_column": "Date", "include": True}}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_config:
+            json.dump(config_data, tmp_config)
+            tmp_config_path = Path(tmp_config.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_file_path),
+                    "--include",
+                    "Sheet1",
+                    "--sheet-config",
+                    str(tmp_config_path),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 1
+            assert "Cannot use multiple sheet selection flags together" in result.stderr
+            assert "--include" in result.stderr
+            assert "--sheet-config" in result.stderr
+        finally:
+            tmp_file_path.unlink()
+            tmp_config_path.unlink()
+
+    def test_split_exclude_sheet_config_flag_conflict(self):
+        """Test that using both --exclude and --sheet-config flags causes an error."""
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as tmp_file:
+            tmp_file.write("Date,Amount\n2024-01-01,100.00\n")
+            tmp_file_path = Path(tmp_file.name)
+
+        # Create a temporary config file
+        config_data = {"Sheet1": {"date_column": "Date", "include": True}}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_config:
+            json.dump(config_data, tmp_config)
+            tmp_config_path = Path(tmp_config.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_file_path),
+                    "--exclude",
+                    "Sheet2",
+                    "--sheet-config",
+                    str(tmp_config_path),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 1
+            assert "Cannot use multiple sheet selection flags together" in result.stderr
+            assert "--exclude" in result.stderr
+            assert "--sheet-config" in result.stderr
+        finally:
+            tmp_file_path.unlink()
+            tmp_config_path.unlink()
+
+    def test_split_all_three_flags_conflict(self):
+        """Test that using all three sheet selection flags causes an error."""
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as tmp_file:
+            tmp_file.write("Date,Amount\n2024-01-01,100.00\n")
+            tmp_file_path = Path(tmp_file.name)
+
+        # Create a temporary config file
+        config_data = {"Sheet1": {"date_column": "Date", "include": True}}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_config:
+            json.dump(config_data, tmp_config)
+            tmp_config_path = Path(tmp_config.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_file_path),
+                    "--include",
+                    "Sheet1",
+                    "--exclude",
+                    "Sheet2",
+                    "--sheet-config",
+                    str(tmp_config_path),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 1
+            assert "Cannot use multiple sheet selection flags together" in result.stderr
+            assert "--include" in result.stderr
+            assert "--exclude" in result.stderr
+            assert "--sheet-config" in result.stderr
+        finally:
+            tmp_file_path.unlink()
+            tmp_config_path.unlink()
+
+    def test_split_valid_include_flag_only(self):
+        """Test that using only --include flag works correctly."""
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            tmp.write("Date,Amount\n2024-01-01,100.00\n")
+            tmp_path = Path(tmp.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--include",
+                    "Sheet1",
+                    "--verbose",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 0
+            assert (
+                "Cannot use multiple sheet selection flags together"
+                not in result.stderr
+            )
+            assert "Starting split command" in result.stderr
+        finally:
+            tmp_path.unlink()
+
+    def test_split_valid_exclude_flag_only(self):
+        """Test that using only --exclude flag works correctly."""
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            tmp.write("Date,Amount\n2024-01-01,100.00\n")
+            tmp_path = Path(tmp.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--exclude",
+                    "Sheet2",
+                    "--verbose",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 0
+            assert (
+                "Cannot use multiple sheet selection flags together"
+                not in result.stderr
+            )
+            assert "Starting split command" in result.stderr
+        finally:
+            tmp_path.unlink()
