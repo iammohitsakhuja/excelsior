@@ -1,1 +1,1 @@
-"""Test package for Excelsior."""
+"""Test package for Excelsior unit tests."""
