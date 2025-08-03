@@ -7,6 +7,7 @@ from .data_processor import (
     SheetConfigProcessor,
 )
 from .date_format_detector import DateFormatDetectionError, DateFormatDetector
+from .file_manager import ConflictResolution, FileOutputError, FileOutputManager
 from .logger import get_logger, setup_logging
 
 __all__ = [
@@ -16,6 +17,9 @@ __all__ = [
     "SheetConfigError",
     "DataProcessor",
     "SheetConfigProcessor",
+    "FileOutputError",
+    "FileOutputManager",
+    "ConflictResolution",
     "setup_logging",
     "get_logger",
 ]
