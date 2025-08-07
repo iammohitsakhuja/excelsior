@@ -28,6 +28,21 @@ logger = get_logger(__name__)
 
 
 @dataclass
+class SplitCommandArgs:
+    """Dataclass to hold split command arguments with proper typing."""
+
+    file: Path
+    date_column: str | None
+    date_format: str | None
+    interval: SplitInterval
+    financial_year_start: int
+    output_dir: Path
+    include: list[str] | None
+    exclude: list[str] | None
+    sheet_config: Path | None
+
+
+@dataclass
 class SplitPeriodData:
     """Data structure to hold information about a split time period."""
 
@@ -325,6 +340,27 @@ Output File Naming:
 
         return None
 
+    def _convert_args(self, args: argparse.Namespace) -> SplitCommandArgs:
+        """Convert argparse.Namespace to typed SplitCommandArgs.
+
+        Args:
+            args: Parsed command line arguments
+
+        Returns:
+            SplitCommandArgs: Typed arguments dataclass
+        """
+        return SplitCommandArgs(
+            file=args.file,
+            date_column=args.date_column,
+            date_format=args.date_format,
+            interval=cast(SplitInterval, args.interval),
+            financial_year_start=args.financial_year_start,
+            output_dir=args.output_dir,
+            include=args.include,
+            exclude=args.exclude,
+            sheet_config=args.sheet_config,
+        )
+
     def execute(self, args: argparse.Namespace) -> int:
         """Execute the split command.
 
@@ -337,31 +373,33 @@ Output File Naming:
         self.logger.info("Starting split command")
 
         try:
-            self._log_execution_info(args)
+            # Convert to typed arguments
+            typed_args = self._convert_args(args)
+
+            self._log_execution_info(typed_args)
 
             # Load file data and process sheet configuration
             file_data, selected_sheets, resolved_configs = (
-                self._load_and_process_sheets(args)
+                self._load_and_process_sheets(typed_args)
             )
 
             # TODO: Take conflict resolution behavior as an argument.
             # Initialize file output manager
             conflict_resolution = ConflictResolution.RENAME  # Default behavior
-            file_manager = FileOutputManager(args.output_dir, conflict_resolution)
+            file_manager = FileOutputManager(typed_args.output_dir, conflict_resolution)
 
             # Process splitting for all sheets
             period_data_map = self._process_sheet_splitting(
-                file_data, selected_sheets, resolved_configs, args
+                file_data, selected_sheets, resolved_configs, typed_args
             )
 
-            # TODO: Use a dataclass for args.
             # Write output files (one per time period)
             all_output_files = self._write_combined_split_files(
                 period_data_map,
                 file_manager,
-                args.file.name,
-                cast(SplitInterval, args.interval),
-                args.financial_year_start,
+                typed_args.file.name,
+                typed_args.interval,
+                typed_args.financial_year_start,
                 selected_sheets,
                 file_data,
             )
@@ -382,11 +420,11 @@ Output File Naming:
             self.logger.error(f"Unexpected error in split command: {str(e)}")
             return 1
 
-    def _log_execution_info(self, args: argparse.Namespace) -> None:
+    def _log_execution_info(self, args: SplitCommandArgs) -> None:
         """Log execution information and warnings.
 
         Args:
-            args: Parsed command line arguments
+            args: Split command arguments
         """
         # Check if file is CSV and Excel-specific options are used
         if args.file.suffix.lower() == ".csv":
@@ -414,12 +452,12 @@ Output File Naming:
             )
 
     def _load_and_process_sheets(
-        self, args: argparse.Namespace
+        self, args: SplitCommandArgs
     ) -> tuple[dict[str, pd.DataFrame], list[str], dict[str, SheetConfig]]:
         """Load file data and process sheet configuration.
 
         Args:
-            args: Parsed command line arguments
+            args: Split command arguments
 
         Returns:
             Tuple of (file_data, selected_sheets, resolved_configs)
@@ -501,7 +539,7 @@ Output File Naming:
         file_data: dict[str, pd.DataFrame],
         selected_sheets: list[str],
         resolved_configs: dict[str, SheetConfig],
-        args: argparse.Namespace,
+        args: SplitCommandArgs,
     ) -> dict[str, SplitPeriodData]:
         """Process splitting for all sheets.
 
@@ -509,7 +547,7 @@ Output File Naming:
             file_data: Dictionary of sheet data
             selected_sheets: List of sheet names to process
             resolved_configs: Resolved configurations for each sheet
-            args: Parsed command line arguments
+            args: Split command arguments
 
         Returns:
             Dictionary mapping period_key to SplitPeriodData objects
@@ -631,7 +669,7 @@ Output File Naming:
         self,
         data: pd.DataFrame,
         date_column: str,
-        interval: str,
+        interval: SplitInterval,
         financial_year_start: int,
     ) -> dict[str, tuple[pd.DataFrame, date]]:
         """Split data by time interval using strategy pattern.
@@ -647,7 +685,7 @@ Output File Naming:
         """
         # TODO: Provide option to preserve the original order of rows.
         # Create appropriate strategy for the interval
-        strategy = create_split_strategy(cast(SplitInterval, interval))
+        strategy = create_split_strategy(interval)
 
         # Use strategy to split the data
         return strategy.split_data(data, date_column, financial_year_start)
