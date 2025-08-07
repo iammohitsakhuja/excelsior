@@ -1,10 +1,14 @@
 """Integration tests for the split command."""
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+import pandas as pd
 
 
 class TestSplitCommandIntegration:
@@ -579,8 +583,6 @@ class TestSplitCommandIntegration:
 
     def test_split_conflict_resolution_overwrite(self):
         """Test split command with overwrite conflict resolution."""
-        import shutil
-
         # Create a temporary CSV file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
             tmp.write("Date,Amount,Description\n")
@@ -618,8 +620,6 @@ class TestSplitCommandIntegration:
             original_mtime = original_file.stat().st_mtime
 
             # Wait a bit to ensure different modification time
-            import time
-
             time.sleep(0.1)
 
             # Second run with overwrite strategy
@@ -660,8 +660,6 @@ class TestSplitCommandIntegration:
 
     def test_split_conflict_resolution_rename(self):
         """Test split command with rename conflict resolution."""
-        import shutil
-
         # Create a temporary CSV file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
             tmp.write("Date,Amount,Description\n")
@@ -739,8 +737,6 @@ class TestSplitCommandIntegration:
 
     def test_split_conflict_resolution_skip(self):
         """Test split command with skip conflict resolution."""
-        import shutil
-
         # Create a temporary CSV file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
             tmp.write("Date,Amount,Description\n")
@@ -809,6 +805,126 @@ class TestSplitCommandIntegration:
             # Should still have only one file
             output_files_after = list(output_dir.glob("*.csv"))
             assert len(output_files_after) == 1
+
+        finally:
+            tmp_path.unlink()
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    def test_split_preserves_original_sheet_order(self):
+        """Test that split preserves original sheet order in multi-sheet Excel files."""
+
+        # Create test Excel file with multiple sheets in specific order
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        # Create sheets with data in a specific order: First, Second, Third, Fourth
+        # We'll split only "Second" and "Fourth", leaving "First" and "Third" unsplit
+        first_data = pd.DataFrame({"Name": ["Item1", "Item2"], "Value": [10, 20]})
+        second_data = pd.DataFrame(
+            {
+                "Date": ["2024-01-15", "2024-02-20"],
+                "Sales": [100.00, 200.00],
+            }
+        )
+        third_data = pd.DataFrame({"Category": ["A", "B"], "Count": [5, 10]})
+        fourth_data = pd.DataFrame(
+            {
+                "Date": ["2024-01-10", "2024-03-15"],
+                "Expenses": [50.00, 75.00],
+            }
+        )
+
+        # Create temporary output directory
+        output_dir = Path(tempfile.mkdtemp())
+
+        try:
+            # Write Excel file with sheets in specific order
+            with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+                first_data.to_excel(writer, sheet_name="First", index=False)
+                second_data.to_excel(writer, sheet_name="Second", index=False)
+                third_data.to_excel(writer, sheet_name="Third", index=False)
+                fourth_data.to_excel(writer, sheet_name="Fourth", index=False)
+
+            # Split only "Second" and "Fourth" sheets (leaving "First" and "Third" unsplit)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--include",
+                    "Second",
+                    "Fourth",
+                    "--output-dir",
+                    str(output_dir),
+                    "--verbose",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result.returncode == 0
+            assert "Split command execution completed successfully" in result.stderr
+
+            # Verify output files exist
+            output_files = list(output_dir.glob("*.xlsx"))
+            assert len(output_files) >= 1  # Should have at least one split period
+
+            # Check that sheet order is preserved in the output files
+            for output_file in output_files:
+                excel_file = pd.ExcelFile(output_file)
+                sheet_names = excel_file.sheet_names
+
+                # Verify all expected sheets are present
+                assert "First" in sheet_names
+                assert "Second" in sheet_names
+                assert "Third" in sheet_names
+                assert "Fourth" in sheet_names
+
+                # Verify original order is preserved: First, Second, Third, Fourth
+                expected_order = ["First", "Second", "Third", "Fourth"]
+                assert sheet_names == expected_order
+
+                # Verify unsplit sheets contain original data
+                first_sheet = pd.read_excel(output_file, sheet_name="First")
+                third_sheet = pd.read_excel(output_file, sheet_name="Third")
+
+                # Check that unsplit sheets have the original data
+                assert len(first_sheet) == 2
+                assert list(first_sheet.columns) == ["Name", "Value"]
+                assert len(third_sheet) == 2
+                assert list(third_sheet.columns) == ["Category", "Count"]
+
+                # Verify split sheets contain filtered data (should be less than original)
+                second_sheet = pd.read_excel(output_file, sheet_name="Second")
+                fourth_sheet = pd.read_excel(output_file, sheet_name="Fourth")
+
+                # Split sheets should have date column and appropriate data for the time period
+                assert "Date" in second_sheet.columns
+                assert "Sales" in second_sheet.columns
+                assert "Date" in fourth_sheet.columns
+                assert "Expenses" in fourth_sheet.columns
+
+                # Verify that sheets preserve structure even when empty for a time period
+                # Check specific files to ensure empty sheets maintain column structure
+                if "2024-02" in output_file.name:  # February file
+                    # Fourth sheet should be empty (no March data) but preserve columns
+                    assert len(fourth_sheet) == 0, (
+                        f"Fourth sheet in {output_file.name} should be empty"
+                    )
+                    assert list(fourth_sheet.columns) == [
+                        "Date",
+                        "Expenses",
+                    ], "Empty sheet should preserve column structure"
+                    # Second sheet should have data (has February data)
+                    assert len(second_sheet) > 0, (
+                        f"Second sheet in {output_file.name} should have data"
+                    )
 
         finally:
             tmp_path.unlink()

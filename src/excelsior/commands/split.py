@@ -760,18 +760,24 @@ Output File Naming:
                 )
             else:
                 # Write multi-sheet Excel file
-                # Combine split data with any non-split sheets
+                # Combine split data with any non-split sheets while preserving original sheet order
                 sheet_data_for_period = {}
 
-                # TODO: Preserve original order of sheets here.
-                # Add split data for selected sheets
-                for sheet_name, sheet_data in sheet_name_data_map.items():
-                    sheet_data_for_period[sheet_name] = sheet_data
-
-                # Add original data for any non-selected sheets (sheets that weren't split)
-                for sheet_name, sheet_data in all_file_data.items():
-                    if sheet_name not in selected_sheets:
-                        sheet_data_for_period[sheet_name] = sheet_data
+                # Iterate through all sheets in original order and use split data where available
+                for sheet_name, original_sheet_data in all_file_data.items():
+                    if sheet_name in selected_sheets:
+                        if sheet_name in sheet_name_data_map:
+                            # Use split data for this time period
+                            sheet_data_for_period[sheet_name] = sheet_name_data_map[
+                                sheet_name
+                            ]
+                        else:
+                            # Create empty DataFrame with same columns for sheets with no data in this period
+                            empty_df = pd.DataFrame(columns=original_sheet_data.columns)
+                            sheet_data_for_period[sheet_name] = empty_df
+                    else:
+                        # Use original data for non-selected sheets
+                        sheet_data_for_period[sheet_name] = original_sheet_data
 
                 output_path = file_manager.write_multiple_sheets(
                     sheet_data_for_period, filename
