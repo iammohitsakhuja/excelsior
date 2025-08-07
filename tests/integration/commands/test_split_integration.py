@@ -25,6 +25,7 @@ class TestSplitCommandIntegration:
         assert "--date-column" in result.stdout
         assert "--interval" in result.stdout
         assert "--output-dir" in result.stdout
+        assert "--conflict-resolution" in result.stdout
         assert "--financial-year-start" in result.stdout
         assert "--include" in result.stdout
         assert "--exclude" in result.stdout
@@ -575,3 +576,240 @@ class TestSplitCommandIntegration:
             assert "Starting split command" in result.stderr
         finally:
             tmp_path.unlink()
+
+    def test_split_conflict_resolution_overwrite(self):
+        """Test split command with overwrite conflict resolution."""
+        import shutil
+
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            tmp.write("Date,Amount,Description\n")
+            tmp.write("2024-01-15,100.00,Payment 1\n")
+            tmp_path = Path(tmp.name)
+
+        # Create temporary output directory
+        output_dir = Path(tempfile.mkdtemp())
+
+        try:
+            # First run to create initial files
+            result1 = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--output-dir",
+                    str(output_dir),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+            assert result1.returncode == 0
+
+            # Get the created file and its modification time
+            output_files = list(output_dir.glob("*.csv"))
+            assert len(output_files) == 1
+            original_file = output_files[0]
+            original_mtime = original_file.stat().st_mtime
+
+            # Wait a bit to ensure different modification time
+            import time
+
+            time.sleep(0.1)
+
+            # Second run with overwrite strategy
+            result2 = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--output-dir",
+                    str(output_dir),
+                    "--conflict-resolution",
+                    "overwrite",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result2.returncode == 0
+            assert "Split command execution completed successfully" in result2.stderr
+
+            # Verify file was overwritten (modification time should be different)
+            new_mtime = original_file.stat().st_mtime
+            assert new_mtime > original_mtime
+
+            # Should still have only one file
+            output_files_after = list(output_dir.glob("*.csv"))
+            assert len(output_files_after) == 1
+
+        finally:
+            tmp_path.unlink()
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    def test_split_conflict_resolution_rename(self):
+        """Test split command with rename conflict resolution."""
+        import shutil
+
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            tmp.write("Date,Amount,Description\n")
+            tmp.write("2024-01-15,100.00,Payment 1\n")
+            tmp_path = Path(tmp.name)
+
+        # Create temporary output directory
+        output_dir = Path(tempfile.mkdtemp())
+
+        try:
+            # First run to create initial files
+            result1 = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--output-dir",
+                    str(output_dir),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+            assert result1.returncode == 0
+
+            # Verify one file was created
+            output_files = list(output_dir.glob("*.csv"))
+            assert len(output_files) == 1
+            original_file = output_files[0]
+
+            # Second run with rename strategy (default behavior)
+            result2 = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--output-dir",
+                    str(output_dir),
+                    "--conflict-resolution",
+                    "rename",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            assert result2.returncode == 0
+            assert "Split command execution completed successfully" in result2.stderr
+
+            # Should now have two files (original + renamed)
+            output_files_after = list(output_dir.glob("*.csv"))
+            assert len(output_files_after) == 2
+
+            # Original file should still exist
+            assert original_file.exists()
+
+            # New file should have _1 suffix
+            renamed_files = [f for f in output_files_after if f != original_file]
+            assert len(renamed_files) == 1
+            assert "_1.csv" in renamed_files[0].name
+
+        finally:
+            tmp_path.unlink()
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    def test_split_conflict_resolution_skip(self):
+        """Test split command with skip conflict resolution."""
+        import shutil
+
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            tmp.write("Date,Amount,Description\n")
+            tmp.write("2024-01-15,100.00,Payment 1\n")
+            tmp_path = Path(tmp.name)
+
+        # Create temporary output directory
+        output_dir = Path(tempfile.mkdtemp())
+
+        try:
+            # First run to create initial files
+            result1 = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--output-dir",
+                    str(output_dir),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+            assert result1.returncode == 0
+
+            # Verify one file was created
+            output_files = list(output_dir.glob("*.csv"))
+            assert len(output_files) == 1
+            original_file = output_files[0]
+            original_mtime = original_file.stat().st_mtime
+
+            # Second run with skip strategy - should fail
+            result2 = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "excelsior.cli",
+                    "split",
+                    "--file",
+                    str(tmp_path),
+                    "--date-column",
+                    "Date",
+                    "--output-dir",
+                    str(output_dir),
+                    "--conflict-resolution",
+                    "skip",
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": "src"},
+            )
+
+            # Should fail with error about existing file
+            assert result2.returncode == 1
+            assert "already exists" in result2.stderr
+
+            # Original file should be unchanged
+            assert original_file.exists()
+            assert original_file.stat().st_mtime == original_mtime
+
+            # Should still have only one file
+            output_files_after = list(output_dir.glob("*.csv"))
+            assert len(output_files_after) == 1
+
+        finally:
+            tmp_path.unlink()
+            shutil.rmtree(output_dir, ignore_errors=True)

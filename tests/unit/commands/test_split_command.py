@@ -63,6 +63,7 @@ class TestSplitCommandRegistration:
             assert args.interval == "month"
             assert args.financial_year_start == 4
             assert args.output_dir == Path("./out/split")
+            assert args.conflict_resolution == "rename"  # Default conflict resolution
             assert args.verbose is False
             assert args.quiet is False
         finally:

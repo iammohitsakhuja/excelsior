@@ -40,6 +40,7 @@ class SplitCommandArgs:
     include: list[str] | None
     exclude: list[str] | None
     sheet_config: Path | None
+    conflict_resolution: ConflictResolution
 
 
 @dataclass
@@ -185,6 +186,9 @@ Examples:
   # Split with sheet-specific configuration
   excelsior split -f complex_data.xlsx -sc sheet_config.json
 
+  # Split with conflict resolution (overwrite existing files)
+  excelsior split -f data.xlsx -d "Date" --conflict-resolution overwrite
+
 Output File Naming:
   day:           original_YYYY-MM-DD.ext
   week:          original_YYYY-Www.ext (ISO week format)
@@ -267,6 +271,19 @@ Output File Naming:
             default=Path("./out/split"),
             help="Directory for output files (default: %(default)s)",
             metavar="PATH",
+        )
+
+        output_group.add_argument(
+            "--conflict-resolution",
+            "-cr",
+            choices=["overwrite", "skip", "rename"],
+            default="rename",
+            help=(
+                "How to handle existing output files: "
+                "overwrite (replace existing), skip (keep existing), "
+                "rename (add suffix to new files) (default: %(default)s)"
+            ),
+            metavar="STRATEGY",
         )
 
         # Excel-specific options
@@ -359,6 +376,7 @@ Output File Naming:
             include=args.include,
             exclude=args.exclude,
             sheet_config=args.sheet_config,
+            conflict_resolution=ConflictResolution(args.conflict_resolution),
         )
 
     def execute(self, args: argparse.Namespace) -> int:
@@ -383,10 +401,10 @@ Output File Naming:
                 self._load_and_process_sheets(typed_args)
             )
 
-            # TODO: Take conflict resolution behavior as an argument.
             # Initialize file output manager
-            conflict_resolution = ConflictResolution.RENAME  # Default behavior
-            file_manager = FileOutputManager(typed_args.output_dir, conflict_resolution)
+            file_manager = FileOutputManager(
+                typed_args.output_dir, typed_args.conflict_resolution
+            )
 
             # Process splitting for all sheets
             period_data_map = self._process_sheet_splitting(
