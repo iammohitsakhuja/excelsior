@@ -20,6 +20,7 @@ from excelsior.utils import (
     SheetConfigError,
     SheetConfigProcessor,
     SplitInterval,
+    create_split_strategy,
     get_logger,
 )
 
@@ -633,7 +634,7 @@ Output File Naming:
         interval: str,
         financial_year_start: int,
     ) -> dict[str, tuple[pd.DataFrame, date]]:
-        """Split data by time interval.
+        """Split data by time interval using strategy pattern.
 
         Args:
             data: DataFrame with parsed dates
@@ -644,75 +645,12 @@ Output File Naming:
         Returns:
             Dictionary mapping period names to (DataFrame, representative_date) tuples
         """
-        groups: dict[str, tuple[pd.DataFrame, date]] = {}
-
         # TODO: Provide option to preserve the original order of rows.
-        # Sort data by date to ensure consistent processing
-        sorted_data = data.sort_values(date_column)
+        # Create appropriate strategy for the interval
+        strategy = create_split_strategy(cast(SplitInterval, interval))
 
-        # TODO: Use strategies for different intervals
-        if interval == "day":
-            # Group by individual days
-            for period_date, group_data in sorted_data.groupby(
-                sorted_data[date_column].dt.date
-            ):
-                period_key = period_date.strftime("%Y-%m-%d")
-                groups[period_key] = (group_data.copy(), period_date)
-
-        elif interval == "week":
-            # Group by ISO weeks
-            for (year, week), group_data in sorted_data.groupby(
-                [
-                    sorted_data[date_column].dt.isocalendar().year,
-                    sorted_data[date_column].dt.isocalendar().week,
-                ]
-            ):
-                # Find the first date of the week as representative date
-                first_date = group_data[date_column].min().date()
-                period_key = f"{year}-W{week:02d}"
-                groups[period_key] = (group_data.copy(), first_date)
-
-        elif interval == "month":
-            # Group by months
-            for (year, month), group_data in sorted_data.groupby(
-                [sorted_data[date_column].dt.year, sorted_data[date_column].dt.month]
-            ):
-                # Use first day of month as representative date
-                representative_date = date(year, month, 1)
-                period_key = f"{year}-{month:02d}"
-                groups[period_key] = (group_data.copy(), representative_date)
-
-        elif interval == "year":
-            # Group by calendar years
-            for year, group_data in sorted_data.groupby(
-                sorted_data[date_column].dt.year
-            ):
-                # Use January 1st as representative date
-                representative_date = date(year, 1, 1)
-                period_key = str(year)
-                groups[period_key] = (group_data.copy(), representative_date)
-
-        elif interval == "financial-year":
-            # Group by financial years
-            def get_financial_year(dt):
-                """Get financial year for a date."""
-                if dt.month >= financial_year_start:
-                    return dt.year
-                else:
-                    return dt.year - 1
-
-            fy_groups = sorted_data.groupby(
-                sorted_data[date_column].apply(get_financial_year)
-            )
-            for fy_start_year, group_data in fy_groups:
-                # Use the start of financial year as representative date
-                representative_date = date(fy_start_year, financial_year_start, 1)
-                fy_end_year = fy_start_year + 1
-                period_key = f"FY{fy_start_year}-{fy_end_year}"
-                groups[period_key] = (group_data.copy(), representative_date)
-
-        self.logger.info(f"Split data into {len(groups)} groups by {interval}")
-        return groups
+        # Use strategy to split the data
+        return strategy.split_data(data, date_column, financial_year_start)
 
     def _write_combined_split_files(
         self,
