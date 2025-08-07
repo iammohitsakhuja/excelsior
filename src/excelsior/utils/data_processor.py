@@ -119,26 +119,11 @@ class DataProcessor:
             if not sheet_dict:
                 raise DataLoadError(f"Excel file contains no sheets: {file_path}")
 
-            # Filter out empty sheets and log information
-            non_empty_sheets = {}
-            for sheet_name, df in sheet_dict.items():
-                if not df.empty:
-                    non_empty_sheets[sheet_name] = df
-                    self.logger.debug(
-                        f"Sheet '{sheet_name}': {len(df)} rows, {len(df.columns)} columns"
-                    )
-                else:
-                    self.logger.warning(
-                        f"Sheet '{sheet_name}' is empty and will be skipped"
-                    )
+            # TODO: Use a flag to filter out empty sheets.
+            # For now, we include all sheets.
 
-            if not non_empty_sheets:
-                raise DataLoadError(f"All sheets in Excel file are empty: {file_path}")
-
-            self.logger.info(
-                f"Loaded Excel file with {len(non_empty_sheets)} non-empty sheets"
-            )
-            return non_empty_sheets
+            self.logger.info(f"Loaded Excel file with {len(sheet_dict)} sheets")
+            return sheet_dict
 
         except Exception as e:
             if isinstance(e, DataLoadError):
@@ -162,11 +147,12 @@ class DataProcessor:
                 f"Available columns: {available_columns}"
             )
 
-        # Check if column has any non-null values
-        non_null_count = data[column_name].notna().sum()
-        if non_null_count == 0:
+        # Check if all values in the column are null
+        if data[column_name].isnull().all():
             raise DataLoadError(f"Date column '{column_name}' contains no valid data")
 
+        # Log validation info
+        non_null_count = data[column_name].notna().sum()
         self.logger.debug(
             f"Date column '{column_name}' validated: {non_null_count} non-null values"
         )
@@ -277,7 +263,8 @@ class SheetConfigProcessor:
                 f"Applied config filters: {len(selected_sheets)} sheets remaining"
             )
 
-        final_sheets = sorted(list(selected_sheets))
+        # Preserve original order.
+        final_sheets = [sheet for sheet in available_sheets if sheet in selected_sheets]
 
         if not final_sheets:
             raise SheetConfigError(
@@ -342,7 +329,7 @@ class SheetConfigProcessor:
     def resolve_sheet_configs(
         self,
         sheet_names: list[str],
-        sheet_data: dict[str, pd.DataFrame] | None = None,
+        sheet_dataframes_map: dict[str, pd.DataFrame] | None = None,
         global_date_column: str | None = None,
         global_date_format: str | None = None,
         sheet_config: SplitSheetConfigSchema | None = None,
@@ -351,7 +338,7 @@ class SheetConfigProcessor:
 
         Args:
             sheet_names: List of sheet names to process
-            sheet_data: Dictionary mapping sheet names to DataFrames (for date format detection)
+            sheet_dataframes_map: Dictionary mapping sheet names to DataFrames (for date format detection)
             global_date_column: Global date column from command line
             global_date_format: Global date format from command line
             sheet_config: Sheet-specific configurations
@@ -362,7 +349,7 @@ class SheetConfigProcessor:
         Raises:
             SheetConfigError: If configuration resolution fails
         """
-        resolved_configs = {}
+        resolved_configs: dict[str, SheetConfig] = {}
 
         for sheet_name in sheet_names:
             # Start with global settings
@@ -391,12 +378,12 @@ class SheetConfigProcessor:
             # Detect date format if not provided and we have access to the data
             if (
                 not config_dict.get("date_format")
-                and sheet_data is not None
-                and sheet_name in sheet_data
+                and sheet_dataframes_map is not None
+                and sheet_name in sheet_dataframes_map
             ):
                 try:
                     detected_format = self.date_format_detector.detect_date_format(
-                        sheet_data[sheet_name], config_dict["date_column"]
+                        sheet_dataframes_map[sheet_name], config_dict["date_column"]
                     )
                     if detected_format:
                         config_dict["date_format"] = detected_format

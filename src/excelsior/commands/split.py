@@ -2,21 +2,37 @@
 
 import argparse
 import json
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+from typing import cast
 
+import pandas as pd
 from pydantic import ValidationError
 
 from excelsior.commands.base import FileProcessingCommand
-from excelsior.schemas import SplitSheetConfigSchema
+from excelsior.schemas import SheetConfig, SplitSheetConfigSchema
 from excelsior.utils import (
+    ConflictResolution,
     DataLoadError,
     DataProcessor,
+    FileOutputManager,
     SheetConfigError,
     SheetConfigProcessor,
+    SplitInterval,
     get_logger,
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class SplitPeriodData:
+    """Data structure to hold information about a split time period."""
+
+    period_key: str
+    representative_date: date
+    sheet_data: dict[str, pd.DataFrame]  # sheet_name -> DataFrame
 
 
 def validate_financial_year_start(value: str) -> int:
@@ -232,7 +248,7 @@ Output File Naming:
             "--output-dir",
             "-o",
             type=Path,
-            default=Path("./split_output"),
+            default=Path("./out/split"),
             help="Directory for output files (default: %(default)s)",
             metavar="PATH",
         )
@@ -320,99 +336,42 @@ Output File Naming:
         self.logger.info("Starting split command")
 
         try:
-            # Check if file is CSV and Excel-specific options are used
-            if args.file.suffix.lower() == ".csv":
-                excel_options = []
-                if args.include:
-                    excel_options.append("--include")
-                if args.exclude:
-                    excel_options.append("--exclude")
-                if args.sheet_config:
-                    excel_options.append("--sheet-config")
+            self._log_execution_info(args)
 
-                if excel_options:
-                    self.logger.warning(
-                        f"Excel-specific options {excel_options} will be ignored for CSV file"
-                    )
-
-            self.logger.info(f"Input file: {args.file}")
-            self.logger.info(f"Date column: {args.date_column}")
-            self.logger.info(f"Split interval: {args.interval}")
-            self.logger.info(f"Output directory: {args.output_dir}")
-
-            if args.interval == "financial-year":
-                self.logger.info(
-                    f"Financial year starts in month: {args.financial_year_start}"
-                )
-
-            # Initialize processors
-            data_processor = DataProcessor()
-            sheet_processor = SheetConfigProcessor()
-
-            # Load sheet configuration if provided
-            sheet_config = None
-            if args.sheet_config:
-                self.logger.info("Loading sheet configuration")
-                sheet_config = sheet_processor.load_sheet_config(args.sheet_config)
-
-            # Load the input file
-            self.logger.info("Loading input file")
-            file_data = data_processor.load_file(args.file)
-
-            # Determine which sheets to process
-            if isinstance(file_data, dict):
-                # Excel file - multiple sheets
-                available_sheets = list(file_data.keys())
-                self.logger.info(f"Excel file contains sheets: {available_sheets}")
-
-                selected_sheets = sheet_processor.process_sheet_selection(
-                    available_sheets=available_sheets,
-                    include_sheets=args.include,
-                    exclude_sheets=args.exclude,
-                    sheet_config=sheet_config,
-                )
-            else:
-                # CSV file - single "sheet"
-                # For CSV files with sheet config, use the first configured sheet name if only one exists
-                if sheet_config and len(sheet_config.keys()) == 1:
-                    csv_sheet_name = list(sheet_config.keys())[0]
-                    self.logger.info(
-                        f"Using sheet config name '{csv_sheet_name}' for CSV file"
-                    )
-                else:
-                    csv_sheet_name = "CSV"
-                    self.logger.info("Processing CSV file as single sheet")
-
-                selected_sheets = [csv_sheet_name]
-                file_data = {csv_sheet_name: file_data}
-
-            # Resolve configurations for each sheet
-            resolved_configs = sheet_processor.resolve_sheet_configs(
-                sheet_names=selected_sheets,
-                sheet_data=file_data,
-                global_date_column=args.date_column,
-                global_date_format=args.date_format,
-                sheet_config=sheet_config,
+            # Load file data and process sheet configuration
+            file_data, selected_sheets, resolved_configs = (
+                self._load_and_process_sheets(args)
             )
 
-            # Validate date columns in each sheet
-            for sheet_name in selected_sheets:
-                sheet_data = file_data[sheet_name]
-                config = resolved_configs[sheet_name]
+            # TODO: Take conflict resolution behavior as an argument.
+            # Initialize file output manager
+            conflict_resolution = ConflictResolution.RENAME  # Default behavior
+            file_manager = FileOutputManager(args.output_dir, conflict_resolution)
 
-                self.logger.info(f"Validating date column for sheet '{sheet_name}'")
-                # date_column is guaranteed to be not None by resolve_sheet_configs
-                assert config.date_column is not None
-                data_processor.validate_date_column(sheet_data, config.date_column)
-
-            self.logger.info(
-                "File loading and configuration processing completed successfully"
+            # Process splitting for all sheets
+            period_data_map = self._process_sheet_splitting(
+                file_data, selected_sheets, resolved_configs, args
             )
 
-            # TODO: Implement date parsing and splitting logic
-            self.logger.info("Date parsing and splitting logic not yet implemented")
+            # TODO: Use a dataclass for args.
+            # Write output files (one per time period)
+            all_output_files = self._write_combined_split_files(
+                period_data_map,
+                file_manager,
+                args.file.name,
+                cast(SplitInterval, args.interval),
+                args.financial_year_start,
+                selected_sheets,
+                file_data,
+            )
 
+            # Log summary of all output files
             self.logger.info("Split command execution completed successfully")
+            self.logger.info(f"Generated {len(all_output_files)} output files:")
+            for output_file in all_output_files:
+                stats = file_manager.get_file_stats(output_file)
+                self.logger.info(f"  {output_file} ({stats['size_human']})")
+
             return 0
 
         except (DataLoadError, SheetConfigError) as e:
@@ -421,3 +380,415 @@ Output File Naming:
         except Exception as e:
             self.logger.error(f"Unexpected error in split command: {str(e)}")
             return 1
+
+    def _log_execution_info(self, args: argparse.Namespace) -> None:
+        """Log execution information and warnings.
+
+        Args:
+            args: Parsed command line arguments
+        """
+        # Check if file is CSV and Excel-specific options are used
+        if args.file.suffix.lower() == ".csv":
+            excel_options = []
+            if args.include:
+                excel_options.append("--include")
+            if args.exclude:
+                excel_options.append("--exclude")
+            if args.sheet_config:
+                excel_options.append("--sheet-config")
+
+            if excel_options:
+                self.logger.warning(
+                    f"Excel-specific options {excel_options} will be ignored for CSV file"
+                )
+
+        self.logger.info(f"Input file: {args.file}")
+        self.logger.info(f"Date column: {args.date_column}")
+        self.logger.info(f"Split interval: {args.interval}")
+        self.logger.info(f"Output directory: {args.output_dir}")
+
+        if args.interval == "financial-year":
+            self.logger.info(
+                f"Financial year starts in month: {args.financial_year_start}"
+            )
+
+    def _load_and_process_sheets(
+        self, args: argparse.Namespace
+    ) -> tuple[dict[str, pd.DataFrame], list[str], dict[str, SheetConfig]]:
+        """Load file data and process sheet configuration.
+
+        Args:
+            args: Parsed command line arguments
+
+        Returns:
+            Tuple of (file_data, selected_sheets, resolved_configs)
+        """
+        # Initialize processors
+        data_processor = DataProcessor()
+        sheet_config_processor = SheetConfigProcessor()
+
+        # Load sheet configuration if provided
+        sheet_config = None
+        if args.sheet_config:
+            self.logger.info("Loading sheet configuration")
+            sheet_config = sheet_config_processor.load_sheet_config(args.sheet_config)
+
+        # Load the input file
+        self.logger.info("Loading input file")
+        file_data = data_processor.load_file(args.file)
+
+        # Determine which sheets to process
+        if isinstance(file_data, dict):
+            # Excel file - multiple sheets
+            available_sheets = list(file_data.keys())
+            self.logger.info(f"Excel file contains sheets: {available_sheets}")
+
+            selected_sheets = sheet_config_processor.process_sheet_selection(
+                available_sheets=available_sheets,
+                include_sheets=args.include,
+                exclude_sheets=args.exclude,
+                sheet_config=sheet_config,
+            )
+        else:
+            # CSV file - single "sheet"
+            # For CSV files with sheet config, use the first configured sheet name if only one exists
+            if sheet_config and len(sheet_config.keys()) == 1:
+                csv_sheet_name = list(sheet_config.keys())[0]
+                self.logger.info(
+                    f"Using sheet config name '{csv_sheet_name}' for CSV file"
+                )
+            else:
+                csv_sheet_name = "CSV"
+                self.logger.info("Processing CSV file as single sheet")
+
+            selected_sheets = [csv_sheet_name]
+            file_data = {csv_sheet_name: file_data}
+
+        # Resolve configurations for each sheet
+        resolved_configs = sheet_config_processor.resolve_sheet_configs(
+            sheet_names=selected_sheets,
+            sheet_dataframes_map=file_data,
+            global_date_column=args.date_column,
+            global_date_format=args.date_format,
+            sheet_config=sheet_config,
+        )
+
+        # Validate date columns in each sheet
+        for sheet_name in selected_sheets:
+            sheet_data = file_data[sheet_name]
+            current_sheet_config = resolved_configs[sheet_name]
+
+            self.logger.info(f"Validating date column for sheet '{sheet_name}'")
+            # Ensure date_column is properly configured
+            if current_sheet_config.date_column is None:
+                raise SheetConfigError(
+                    f"No date column configured for sheet '{sheet_name}'. "
+                    f"This indicates a configuration error."
+                )
+            data_processor.validate_date_column(
+                sheet_data, current_sheet_config.date_column
+            )
+
+        self.logger.info(
+            "File loading and configuration processing completed successfully"
+        )
+
+        return file_data, selected_sheets, resolved_configs
+
+    def _process_sheet_splitting(
+        self,
+        file_data: dict[str, pd.DataFrame],
+        selected_sheets: list[str],
+        resolved_configs: dict[str, SheetConfig],
+        args: argparse.Namespace,
+    ) -> dict[str, SplitPeriodData]:
+        """Process splitting for all sheets.
+
+        Args:
+            file_data: Dictionary of sheet data
+            selected_sheets: List of sheet names to process
+            resolved_configs: Resolved configurations for each sheet
+            args: Parsed command line arguments
+
+        Returns:
+            Dictionary mapping period_key to SplitPeriodData objects
+        """
+        self.logger.info("Starting date parsing and splitting process")
+
+        # Collect all split data by time period
+        period_data_map: dict[str, SplitPeriodData] = {}
+
+        for sheet_name in selected_sheets:
+            sheet_data = file_data[sheet_name]
+            config = resolved_configs[sheet_name]
+
+            self.logger.info(f"Processing sheet '{sheet_name}' for splitting")
+
+            # Ensure date_column is properly configured
+            if config.date_column is None:
+                raise SheetConfigError(
+                    f"No date column configured for sheet '{sheet_name}'. "
+                    f"This indicates a configuration error."
+                )
+
+            # Parse dates in the sheet
+            parsed_data = self._parse_dates_in_sheet(
+                sheet_data, config.date_column, config.date_format
+            )
+
+            # Split data by the specified interval
+            split_groups = self._split_data_by_interval(
+                parsed_data,
+                config.date_column,
+                args.interval,
+                args.financial_year_start,
+            )
+
+            # Collect split data by time period
+            for period_key, (
+                period_data,
+                representative_date,
+            ) in split_groups.items():
+                if period_key not in period_data_map:
+                    period_data_map[period_key] = SplitPeriodData(
+                        period_key=period_key,
+                        representative_date=representative_date,
+                        sheet_data={},
+                    )
+
+                period_data_map[period_key].sheet_data[sheet_name] = period_data
+
+            self.logger.info(
+                f"Sheet '{sheet_name}' prepared for {len(split_groups)} time periods"
+            )
+
+        return period_data_map
+
+    def _parse_dates_in_sheet(
+        self, data: pd.DataFrame, date_column: str, date_format: str | None
+    ) -> pd.DataFrame:
+        """Parse dates in a sheet and return DataFrame with parsed date column.
+
+        Args:
+            data: Input DataFrame
+            date_column: Name of the column containing date values
+            date_format: Optional date format string
+
+        Returns:
+            DataFrame with parsed dates
+
+        Raises:
+            DataLoadError: If date parsing fails
+        """
+        try:
+            # Create a copy to avoid modifying original data
+            parsed_data = data.copy()
+
+            # TODO: Preserve original date/datetime format.
+            # Parse dates using pandas
+            if date_format:
+                # Use explicit format if provided
+                parsed_data[date_column] = pd.to_datetime(
+                    parsed_data[date_column], format=date_format, errors="coerce"
+                )
+            else:
+                # Let pandas infer the format
+                parsed_data[date_column] = pd.to_datetime(
+                    parsed_data[date_column], errors="coerce"
+                )
+
+            # Check for parsing failures
+            null_dates = parsed_data[date_column].isna().sum()
+            total_dates = len(parsed_data)
+
+            if null_dates == total_dates:
+                raise DataLoadError(
+                    f"Failed to parse any dates in column '{date_column}'. "
+                    f"Check the date format or provide explicit format with --date-format"
+                )
+
+            if null_dates > 0:
+                self.logger.warning(
+                    f"Failed to parse {null_dates} out of {total_dates} dates in column '{date_column}'"
+                )
+                # TODO: Add all unparseable dates to a separate DataFrame.
+                # Remove rows with unparseable dates
+                parsed_data = parsed_data.dropna(subset=[date_column])
+
+            self.logger.info(
+                f"Successfully parsed {len(parsed_data)} dates in column '{date_column}'"
+            )
+
+            return parsed_data
+
+        except Exception as e:
+            raise DataLoadError(
+                f"Date parsing failed for column '{date_column}': {str(e)}"
+            ) from e
+
+    def _split_data_by_interval(
+        self,
+        data: pd.DataFrame,
+        date_column: str,
+        interval: str,
+        financial_year_start: int,
+    ) -> dict[str, tuple[pd.DataFrame, date]]:
+        """Split data by time interval.
+
+        Args:
+            data: DataFrame with parsed dates
+            date_column: Name of the date column
+            interval: Time interval for splitting
+            financial_year_start: Start month of financial year
+
+        Returns:
+            Dictionary mapping period names to (DataFrame, representative_date) tuples
+        """
+        groups: dict[str, tuple[pd.DataFrame, date]] = {}
+
+        # TODO: Provide option to preserve the original order of rows.
+        # Sort data by date to ensure consistent processing
+        sorted_data = data.sort_values(date_column)
+
+        # TODO: Use strategies for different intervals
+        if interval == "day":
+            # Group by individual days
+            for period_date, group_data in sorted_data.groupby(
+                sorted_data[date_column].dt.date
+            ):
+                period_key = period_date.strftime("%Y-%m-%d")
+                groups[period_key] = (group_data.copy(), period_date)
+
+        elif interval == "week":
+            # Group by ISO weeks
+            for (year, week), group_data in sorted_data.groupby(
+                [
+                    sorted_data[date_column].dt.isocalendar().year,
+                    sorted_data[date_column].dt.isocalendar().week,
+                ]
+            ):
+                # Find the first date of the week as representative date
+                first_date = group_data[date_column].min().date()
+                period_key = f"{year}-W{week:02d}"
+                groups[period_key] = (group_data.copy(), first_date)
+
+        elif interval == "month":
+            # Group by months
+            for (year, month), group_data in sorted_data.groupby(
+                [sorted_data[date_column].dt.year, sorted_data[date_column].dt.month]
+            ):
+                # Use first day of month as representative date
+                representative_date = date(year, month, 1)
+                period_key = f"{year}-{month:02d}"
+                groups[period_key] = (group_data.copy(), representative_date)
+
+        elif interval == "year":
+            # Group by calendar years
+            for year, group_data in sorted_data.groupby(
+                sorted_data[date_column].dt.year
+            ):
+                # Use January 1st as representative date
+                representative_date = date(year, 1, 1)
+                period_key = str(year)
+                groups[period_key] = (group_data.copy(), representative_date)
+
+        elif interval == "financial-year":
+            # Group by financial years
+            def get_financial_year(dt):
+                """Get financial year for a date."""
+                if dt.month >= financial_year_start:
+                    return dt.year
+                else:
+                    return dt.year - 1
+
+            fy_groups = sorted_data.groupby(
+                sorted_data[date_column].apply(get_financial_year)
+            )
+            for fy_start_year, group_data in fy_groups:
+                # Use the start of financial year as representative date
+                representative_date = date(fy_start_year, financial_year_start, 1)
+                fy_end_year = fy_start_year + 1
+                period_key = f"FY{fy_start_year}-{fy_end_year}"
+                groups[period_key] = (group_data.copy(), representative_date)
+
+        self.logger.info(f"Split data into {len(groups)} groups by {interval}")
+        return groups
+
+    def _write_combined_split_files(
+        self,
+        period_data_map: dict[str, SplitPeriodData],
+        file_manager: FileOutputManager,
+        original_filename: str,
+        interval: SplitInterval,
+        financial_year_start: int,
+        selected_sheets: list[str],
+        all_file_data: dict[str, pd.DataFrame],
+    ) -> list[Path]:
+        """Write combined split data to output files (one file per time period).
+
+        Args:
+            period_data_map: Dictionary mapping period_key to SplitPeriodData objects
+            file_manager: FileOutputManager instance
+            original_filename: Name of the original file
+            interval: Time interval used for splitting
+            financial_year_start: Start month of financial year
+            selected_sheets: List of all sheets being processed
+            all_file_data: All sheet data from the original file
+
+        Returns:
+            List of paths to written files
+        """
+        output_files: list[Path] = []
+
+        for period_key in sorted(period_data_map.keys()):
+            period_data = period_data_map[period_key]
+            sheet_name_data_map = period_data.sheet_data
+            representative_date = period_data.representative_date
+
+            # Generate filename for this period
+            filename = file_manager.generate_filename(
+                original_filename, interval, representative_date, financial_year_start
+            )
+
+            # Determine file format and content
+            original_path = Path(original_filename)
+            file_extension = original_path.suffix.lower()
+
+            if file_extension == ".csv" or len(selected_sheets) == 1:
+                # Write single sheet (CSV or single-sheet Excel)
+                # For CSV, use the only sheet's data
+                # For single-sheet Excel, use that sheet's data
+                sheet_name = next(iter(sheet_name_data_map.keys()))
+                period_data_df = sheet_name_data_map[sheet_name]
+
+                output_path = file_manager.write_dataframe(
+                    period_data_df, filename, sheet_name
+                )
+            else:
+                # Write multi-sheet Excel file
+                # Combine split data with any non-split sheets
+                sheet_data_for_period = {}
+
+                # TODO: Preserve original order of sheets here.
+                # Add split data for selected sheets
+                for sheet_name, sheet_data in sheet_name_data_map.items():
+                    sheet_data_for_period[sheet_name] = sheet_data
+
+                # Add original data for any non-selected sheets (sheets that weren't split)
+                for sheet_name, sheet_data in all_file_data.items():
+                    if sheet_name not in selected_sheets:
+                        sheet_data_for_period[sheet_name] = sheet_data
+
+                output_path = file_manager.write_multiple_sheets(
+                    sheet_data_for_period, filename
+                )
+
+            output_files.append(output_path)
+
+            # Log details about this period's file
+            total_rows = sum(len(df) for df in sheet_name_data_map.values())
+            self.logger.debug(
+                f"Written {total_rows} total rows for period {period_key} to {output_path}"
+            )
+
+        return output_files

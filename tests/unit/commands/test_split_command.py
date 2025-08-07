@@ -62,7 +62,7 @@ class TestSplitCommandRegistration:
             # Check default values
             assert args.interval == "month"
             assert args.financial_year_start == 4
-            assert args.output_dir == Path("./split_output")
+            assert args.output_dir == Path("./out/split")
             assert args.verbose is False
             assert args.quiet is False
         finally:

@@ -9,6 +9,7 @@ from .data_processor import (
 from .date_format_detector import DateFormatDetectionError, DateFormatDetector
 from .file_manager import ConflictResolution, FileOutputError, FileOutputManager
 from .logger import get_logger, setup_logging
+from .types import SplitInterval
 
 __all__ = [
     "DateFormatDetector",
@@ -20,6 +21,7 @@ __all__ = [
     "FileOutputError",
     "FileOutputManager",
     "ConflictResolution",
+    "SplitInterval",
     "setup_logging",
     "get_logger",
 ]

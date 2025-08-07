@@ -329,7 +329,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=sheet_data,
+            sheet_dataframes_map=sheet_data,
             global_date_column="Date",
         )
 
@@ -354,7 +354,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=sheet_data,
+            sheet_dataframes_map=sheet_data,
             global_date_column="Date",
         )
 
@@ -379,7 +379,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=sheet_data,
+            sheet_dataframes_map=sheet_data,
             global_date_column="Date",
         )
 
@@ -408,7 +408,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=sheet_data,
+            sheet_dataframes_map=sheet_data,
             global_date_column="DateTime",
         )
 
@@ -435,7 +435,7 @@ class TestSheetConfigProcessor:
         with pytest.raises(SheetConfigError) as exc_info:
             processor.resolve_sheet_configs(
                 sheet_names,
-                sheet_data=sheet_data,
+                sheet_dataframes_map=sheet_data,
                 global_date_column="Date",
             )
 
@@ -462,7 +462,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=sheet_data,
+            sheet_dataframes_map=sheet_data,
             global_date_column="Date",
             global_date_format="%Y-%m-%d",  # Explicit format
         )
@@ -478,7 +478,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=None,  # No data provided
+            sheet_dataframes_map=None,  # No data provided
             global_date_column="Date",
         )
 
@@ -503,7 +503,7 @@ class TestSheetConfigProcessor:
 
         result = processor.resolve_sheet_configs(
             sheet_names,
-            sheet_data=sheet_data,
+            sheet_dataframes_map=sheet_data,
             global_date_column="Date",
         )
 

@@ -41,7 +41,7 @@ class TestDataProcessingIntegration:
             # Resolve configurations
             resolved_configs = sheet_processor.resolve_sheet_configs(
                 sheet_names=selected_sheets,
-                sheet_data=file_data,
+                sheet_dataframes_map=file_data,
                 global_date_column="Date",
             )
 
@@ -118,7 +118,7 @@ class TestDataProcessingIntegration:
                 # Resolve configurations
                 resolved_configs = sheet_processor.resolve_sheet_configs(
                     sheet_names=selected_sheets,
-                    sheet_data=file_data,
+                    sheet_dataframes_map=file_data,
                     global_date_column="Date",  # Should be overridden for Expenses
                     sheet_config=sheet_config,
                 )
@@ -189,7 +189,7 @@ class TestDataProcessingIntegration:
             # Resolve configurations with date format detection
             resolved_configs = sheet_processor.resolve_sheet_configs(
                 sheet_names=selected_sheets,
-                sheet_data=file_data,
+                sheet_dataframes_map=file_data,
                 global_date_column="Date",  # No global format - should auto-detect
             )
 
@@ -236,7 +236,7 @@ class TestDataProcessingIntegration:
             # Resolve configurations with date format detection
             resolved_configs = sheet_processor.resolve_sheet_configs(
                 sheet_names=selected_sheets,
-                sheet_data=file_data,
+                sheet_dataframes_map=file_data,
                 global_date_column="DateTime",
             )
 

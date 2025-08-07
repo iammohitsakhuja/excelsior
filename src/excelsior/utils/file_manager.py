@@ -4,11 +4,11 @@ import os
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Literal
 
 import pandas as pd
 
 from excelsior.utils.logger import get_logger
+from excelsior.utils.types import SplitInterval
 
 logger = get_logger(__name__)
 
@@ -25,9 +25,6 @@ class ConflictResolution(Enum):
     OVERWRITE = "overwrite"
     SKIP = "skip"
     RENAME = "rename"
-
-
-SplitInterval = Literal["day", "week", "month", "year", "financial-year"]
 
 
 class FileOutputManager:
@@ -313,38 +310,6 @@ class FileOutputManager:
             raise FileOutputError(
                 f"Failed to write multi-sheet file {filename}: {e}"
             ) from e
-
-    @staticmethod
-    def merge_sheet_data(
-        all_sheet_data: dict[str, pd.DataFrame],
-        split_sheet_data: dict[str, pd.DataFrame],
-        split_sheets: list[str],
-    ) -> dict[str, pd.DataFrame]:
-        """Merge original and split sheet data for writing.
-
-        This is a utility method for the split command to combine original sheets
-        with split data, replacing split sheets with their filtered data while
-        preserving non-split sheets unchanged.
-
-        Args:
-            all_sheet_data: Dictionary of all original sheet data
-            split_sheet_data: Dictionary of split data for specific sheets
-            split_sheets: List of sheet names that were split
-
-        Returns:
-            Dictionary of merged sheet data ready for writing
-        """
-        merged_data = {}
-
-        for sheet_name, df in all_sheet_data.items():
-            if sheet_name in split_sheets and sheet_name in split_sheet_data:
-                # Use split data for this sheet
-                merged_data[sheet_name] = split_sheet_data[sheet_name]
-            else:
-                # Use original data for non-split sheets
-                merged_data[sheet_name] = df
-
-        return merged_data
 
     def get_file_stats(self, file_path: Path) -> dict[str, str | int | datetime]:
         """Get statistics about a written file.
