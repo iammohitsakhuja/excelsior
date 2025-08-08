@@ -701,7 +701,6 @@ Output File Naming:
         Returns:
             Dictionary mapping period names to (DataFrame, representative_date) tuples
         """
-        # TODO: Provide option to preserve the original order of rows.
         # Create appropriate strategy for the interval
         strategy = create_split_strategy(interval)
 

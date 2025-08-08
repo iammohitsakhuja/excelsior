@@ -60,10 +60,6 @@ class BaseSplitStrategy(ABC):
         """
         pass
 
-    def _sort_data_by_date(self, data: pd.DataFrame, date_column: str) -> pd.DataFrame:
-        """Sort data by date column."""
-        return data.sort_values(date_column)
-
 
 class DaySplitStrategy(BaseSplitStrategy):
     """Strategy for splitting data by individual days."""
@@ -76,12 +72,9 @@ class DaySplitStrategy(BaseSplitStrategy):
     ) -> dict[str, tuple[pd.DataFrame, date]]:
         """Split data by individual days."""
         groups: dict[str, tuple[pd.DataFrame, date]] = {}
-        sorted_data = self._sort_data_by_date(data, date_column)
 
         # Group by individual days
-        for period_date, group_data in sorted_data.groupby(
-            sorted_data[date_column].dt.date
-        ):
+        for period_date, group_data in data.groupby(data[date_column].dt.date):
             period_key = period_date.strftime("%Y-%m-%d")
             groups[period_key] = (group_data.copy(), period_date)
 
@@ -100,13 +93,12 @@ class WeekSplitStrategy(BaseSplitStrategy):
     ) -> dict[str, tuple[pd.DataFrame, date]]:
         """Split data by ISO weeks."""
         groups: dict[str, tuple[pd.DataFrame, date]] = {}
-        sorted_data = self._sort_data_by_date(data, date_column)
 
         # Group by ISO weeks
-        for (year, week), group_data in sorted_data.groupby(
+        for (year, week), group_data in data.groupby(
             [
-                sorted_data[date_column].dt.isocalendar().year,
-                sorted_data[date_column].dt.isocalendar().week,
+                data[date_column].dt.isocalendar().year,
+                data[date_column].dt.isocalendar().week,
             ]
         ):
             # Find the first date of the week as representative date
@@ -129,11 +121,10 @@ class MonthSplitStrategy(BaseSplitStrategy):
     ) -> dict[str, tuple[pd.DataFrame, date]]:
         """Split data by calendar months."""
         groups: dict[str, tuple[pd.DataFrame, date]] = {}
-        sorted_data = self._sort_data_by_date(data, date_column)
 
         # Group by months
-        for (year, month), group_data in sorted_data.groupby(
-            [sorted_data[date_column].dt.year, sorted_data[date_column].dt.month]
+        for (year, month), group_data in data.groupby(
+            [data[date_column].dt.year, data[date_column].dt.month]
         ):
             # Use first day of month as representative date
             representative_date = date(year, month, 1)
@@ -155,10 +146,9 @@ class YearSplitStrategy(BaseSplitStrategy):
     ) -> dict[str, tuple[pd.DataFrame, date]]:
         """Split data by calendar years."""
         groups: dict[str, tuple[pd.DataFrame, date]] = {}
-        sorted_data = self._sort_data_by_date(data, date_column)
 
         # Group by calendar years
-        for year, group_data in sorted_data.groupby(sorted_data[date_column].dt.year):
+        for year, group_data in data.groupby(data[date_column].dt.year):
             # Use January 1st as representative date
             representative_date = date(year, 1, 1)
             period_key = str(year)
@@ -179,7 +169,6 @@ class FinancialYearSplitStrategy(BaseSplitStrategy):
     ) -> dict[str, tuple[pd.DataFrame, date]]:
         """Split data by financial years."""
         groups: dict[str, tuple[pd.DataFrame, date]] = {}
-        sorted_data = self._sort_data_by_date(data, date_column)
 
         def get_financial_year(dt):
             """Get financial year for a date."""
@@ -188,9 +177,7 @@ class FinancialYearSplitStrategy(BaseSplitStrategy):
             else:
                 return dt.year - 1
 
-        fy_groups = sorted_data.groupby(
-            sorted_data[date_column].apply(get_financial_year)
-        )
+        fy_groups = data.groupby(data[date_column].apply(get_financial_year))
         for fy_start_year, group_data in fy_groups:
             # Use the start of financial year as representative date
             representative_date = date(fy_start_year, financial_year_start, 1)

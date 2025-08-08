@@ -426,8 +426,8 @@ class TestStrategiesEdgeCases:
                 expected_columns = {"Date", "Value", "Description", "Category"}
                 assert set(period_data.columns) == expected_columns
 
-    def test_all_strategies_maintain_row_order_within_groups(self):
-        """Test that strategies maintain sorted order within groups (by date)."""
+    def test_all_strategies_preserve_original_row_order_within_groups(self):
+        """Test that strategies preserve original row order within groups."""
         # Create data where rows are not sorted by date
         data = pd.DataFrame(
             {
@@ -448,5 +448,5 @@ class TestStrategiesEdgeCases:
 
             if len(result) == 1:  # All data in same group (month/year strategies)
                 period_data, _ = list(result.values())[0]
-                # Should be sorted by date, so order should be [10, 20, 30]
-                assert list(period_data["Value"]) == [10, 20, 30]
+                # Should preserve original order, so order should be [30, 10, 20]
+                assert list(period_data["Value"]) == [30, 10, 20]
