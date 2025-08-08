@@ -170,7 +170,7 @@ class FinancialYearSplitStrategy(BaseSplitStrategy):
         """Split data by financial years."""
         groups: dict[str, tuple[pd.DataFrame, date]] = {}
 
-        def get_financial_year(dt):
+        def get_financial_year(dt: date) -> int:
             """Get financial year for a date."""
             if dt.month >= financial_year_start:
                 return dt.year

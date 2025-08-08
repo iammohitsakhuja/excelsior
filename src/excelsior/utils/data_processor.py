@@ -296,7 +296,7 @@ class SheetConfigProcessor:
             )
 
     def _apply_config_filters(
-        self, selected_sheets: set, sheet_config: SplitSheetConfigSchema
+        self, selected_sheets: set[str], sheet_config: SplitSheetConfigSchema
     ) -> list[str]:
         """Apply include/exclude filters from sheet configuration.
 
