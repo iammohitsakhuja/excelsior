@@ -119,9 +119,6 @@ class DataProcessor:
             if not sheet_dict:
                 raise DataLoadError(f"Excel file contains no sheets: {file_path}")
 
-            # TODO: Use a flag to filter out empty sheets.
-            # For now, we include all sheets.
-
             self.logger.info(f"Loaded Excel file with {len(sheet_dict)} sheets")
             return sheet_dict
 

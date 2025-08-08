@@ -50,6 +50,9 @@ class SplitPeriodData:
     period_key: str
     representative_date: date
     sheet_data: dict[str, pd.DataFrame]  # sheet_name -> DataFrame
+    original_date_data: dict[
+        str, pd.Series
+    ]  # sheet_name -> original date column values
 
 
 @dataclass
@@ -58,6 +61,9 @@ class UnparseableDataResult:
 
     parsed_data: pd.DataFrame
     unparseable_data: pd.DataFrame | None
+    original_date_data: (
+        pd.Series | None
+    )  # Preserve original date column for format restoration
 
 
 def validate_financial_year_start(value: str) -> int:
@@ -428,6 +434,7 @@ Output File Naming:
                 typed_args.financial_year_start,
                 selected_sheets,
                 file_data,
+                resolved_configs,
             )
 
             # Write unparseable data file if there are any unparseable rows
@@ -645,9 +652,22 @@ Output File Naming:
                         period_key=period_key,
                         representative_date=representative_date,
                         sheet_data={},
+                        original_date_data={},
                     )
 
                 period_data_map[period_key].sheet_data[sheet_name] = period_data
+
+                # Split original date data to match the grouped data
+                if parse_result.original_date_data is not None:
+                    # Get the indices of rows in this period's data from the original parsed data
+                    period_indices = period_data.index
+                    # Map back to original date data using the same indices
+                    period_original_dates = parse_result.original_date_data.loc[
+                        period_indices
+                    ]
+                    period_data_map[period_key].original_date_data[sheet_name] = (
+                        period_original_dates
+                    )
 
             self.logger.info(
                 f"Sheet '{sheet_name}' prepared for {len(split_groups)} time periods"
@@ -675,7 +695,9 @@ Output File Naming:
             # Create a copy to avoid modifying original data
             parsed_data = data.copy()
 
-            # TODO: Preserve original date/datetime format.
+            # Preserve original date column for format restoration
+            original_date_values = data[date_column].copy()
+
             # Parse dates using pandas
             if date_format:
                 # Use explicit format if provided
@@ -692,6 +714,11 @@ Output File Naming:
             date_mask = parsed_data[date_column].notna()
             valid_data = parsed_data[date_mask].copy()
             unparseable_data = data[~date_mask].copy() if (~date_mask).any() else None
+
+            # Preserve only the original date values that correspond to valid parsed data
+            valid_original_dates = (
+                original_date_values[date_mask] if date_mask.any() else None
+            )
 
             # Check for parsing failures
             null_dates = (~date_mask).sum()
@@ -714,7 +741,9 @@ Output File Naming:
             )
 
             return UnparseableDataResult(
-                parsed_data=valid_data, unparseable_data=unparseable_data
+                parsed_data=valid_data,
+                unparseable_data=unparseable_data,
+                original_date_data=valid_original_dates,
             )
 
         except Exception as e:
@@ -746,6 +775,27 @@ Output File Naming:
         # Use strategy to split the data
         return strategy.split_data(data, date_column, financial_year_start)
 
+    def _restore_original_date_format(
+        self, data: pd.DataFrame, date_column: str, original_dates: pd.Series
+    ) -> pd.DataFrame:
+        """Restore original date format in the data before writing to output.
+
+        Args:
+            data: DataFrame with parsed datetime column
+            date_column: Name of the date column to restore
+            original_dates: Series with original date values
+
+        Returns:
+            DataFrame with original date format restored
+        """
+        # Create a copy to avoid modifying the original data
+        result_data = data.copy()
+
+        # Restore original date format
+        result_data[date_column] = original_dates
+
+        return result_data
+
     def _write_combined_split_files(
         self,
         period_data_map: dict[str, SplitPeriodData],
@@ -755,6 +805,7 @@ Output File Naming:
         financial_year_start: int,
         selected_sheets: list[str],
         all_file_data: dict[str, pd.DataFrame],
+        resolved_configs: dict[str, SheetConfig],
     ) -> list[Path]:
         """Write combined split data to output files (one file per time period).
 
@@ -766,6 +817,7 @@ Output File Naming:
             financial_year_start: Start month of financial year
             selected_sheets: List of all sheets being processed
             all_file_data: All sheet data from the original file
+            resolved_configs: Resolved configurations for each sheet
 
         Returns:
             List of paths to written files
@@ -793,6 +845,18 @@ Output File Naming:
                 sheet_name = next(iter(sheet_name_data_map.keys()))
                 period_data_df = sheet_name_data_map[sheet_name]
 
+                # Restore original date format for this sheet
+                if (
+                    sheet_name in period_data.original_date_data
+                    and sheet_name in resolved_configs
+                ):
+                    date_column = resolved_configs[sheet_name].date_column
+                    if date_column:
+                        original_dates = period_data.original_date_data[sheet_name]
+                        period_data_df = self._restore_original_date_format(
+                            period_data_df, date_column, original_dates
+                        )
+
                 output_path = file_manager.write_dataframe(
                     period_data_df, filename, sheet_name
                 )
@@ -806,9 +870,23 @@ Output File Naming:
                     if sheet_name in selected_sheets:
                         if sheet_name in sheet_name_data_map:
                             # Use split data for this time period
-                            sheet_data_for_period[sheet_name] = sheet_name_data_map[
-                                sheet_name
-                            ]
+                            split_data = sheet_name_data_map[sheet_name]
+
+                            # Restore original date format for this sheet
+                            if (
+                                sheet_name in period_data.original_date_data
+                                and sheet_name in resolved_configs
+                            ):
+                                date_column = resolved_configs[sheet_name].date_column
+                                if date_column:
+                                    original_dates = period_data.original_date_data[
+                                        sheet_name
+                                    ]
+                                    split_data = self._restore_original_date_format(
+                                        split_data, date_column, original_dates
+                                    )
+
+                            sheet_data_for_period[sheet_name] = split_data
                         else:
                             # Create empty DataFrame with same columns for sheets with no data in this period
                             empty_df = pd.DataFrame(columns=original_sheet_data.columns)
