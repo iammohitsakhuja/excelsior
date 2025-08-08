@@ -5,10 +5,12 @@ import json
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from excelsior.commands.split import (
     SplitCommand,
+    UnparseableDataResult,
     validate_financial_year_start,
     validate_sheet_config,
 )
@@ -366,3 +368,78 @@ class TestSplitCommandValidation:
                     validate_sheet_config(str(tmp_path))
             finally:
                 tmp_path.unlink()
+
+
+class TestUnparseableDataHandling:
+    """Test handling of unparseable date data."""
+
+    def test_generate_unparseable_filename(self):
+        """Test generation of unparseable data filename."""
+        command = SplitCommand()
+
+        # Test Excel file
+        excel_filename = command._generate_unparseable_filename("data.xlsx")
+        assert excel_filename == "data_unparseable_dates.xlsx"
+
+        # Test CSV file
+        csv_filename = command._generate_unparseable_filename("sales.csv")
+        assert csv_filename == "sales_unparseable_dates.csv"
+
+        # Test file with complex name
+        complex_filename = command._generate_unparseable_filename("my-data_file.xlsx")
+        assert complex_filename == "my-data_file_unparseable_dates.xlsx"
+
+    def test_parse_dates_returns_unparseable_data(self):
+        """Test that _parse_dates_in_sheet returns unparseable data."""
+
+        command = SplitCommand()
+
+        # Create test data with some unparseable dates
+        test_data = pd.DataFrame(
+            {
+                "date_col": ["2023-01-01", "invalid_date", "2023-02-01", "not_a_date"],
+                "value": [10, 20, 30, 40],
+            }
+        )
+
+        result = command._parse_dates_in_sheet(test_data, "date_col", None)
+
+        # Verify the result is an UnparseableDataResult
+        assert isinstance(result, UnparseableDataResult)
+
+        # Should have 2 valid rows
+        assert len(result.parsed_data) == 2
+        assert result.parsed_data["date_col"].notna().all()
+
+        # Should have 2 unparseable rows
+        assert result.unparseable_data is not None
+        assert len(result.unparseable_data) == 2
+        assert list(result.unparseable_data["date_col"]) == [
+            "invalid_date",
+            "not_a_date",
+        ]
+        assert list(result.unparseable_data["value"]) == [20, 40]
+
+    def test_parse_dates_no_unparseable_data(self):
+        """Test parsing when all dates are valid."""
+        command = SplitCommand()
+
+        # Create test data with all valid dates
+        test_data = pd.DataFrame(
+            {
+                "date_col": ["2023-01-01", "2023-02-01", "2023-03-01"],
+                "value": [10, 20, 30],
+            }
+        )
+
+        result = command._parse_dates_in_sheet(test_data, "date_col", None)
+
+        # Verify the result is an UnparseableDataResult
+        assert isinstance(result, UnparseableDataResult)
+
+        # Should have all 3 valid rows
+        assert len(result.parsed_data) == 3
+        assert result.parsed_data["date_col"].notna().all()
+
+        # Should have no unparseable data
+        assert result.unparseable_data is None

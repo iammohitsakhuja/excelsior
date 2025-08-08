@@ -52,6 +52,14 @@ class SplitPeriodData:
     sheet_data: dict[str, pd.DataFrame]  # sheet_name -> DataFrame
 
 
+@dataclass
+class UnparseableDataResult:
+    """Data structure to hold results from date parsing operation."""
+
+    parsed_data: pd.DataFrame
+    unparseable_data: pd.DataFrame | None
+
+
 def validate_financial_year_start(value: str) -> int:
     """Validate financial year start month.
 
@@ -407,7 +415,7 @@ Output File Naming:
             )
 
             # Process splitting for all sheets
-            period_data_map = self._process_sheet_splitting(
+            period_data_map, unparseable_data_map = self._process_sheet_splitting(
                 file_data, selected_sheets, resolved_configs, typed_args
             )
 
@@ -422,12 +430,32 @@ Output File Naming:
                 file_data,
             )
 
+            # Write unparseable data file if there are any unparseable rows
+            unparseable_file = None
+            if unparseable_data_map:
+                unparseable_file = self._write_unparseable_data_file(
+                    unparseable_data_map,
+                    file_manager,
+                    typed_args.file.name,
+                    selected_sheets,
+                    file_data,
+                )
+                all_output_files.append(unparseable_file)
+
             # Log summary of all output files
             self.logger.info("Split command execution completed successfully")
             self.logger.info(f"Generated {len(all_output_files)} output files:")
             for output_file in all_output_files:
                 stats = file_manager.get_file_stats(output_file)
                 self.logger.info(f"  {output_file} ({stats['size_human']})")
+
+            if unparseable_file:
+                total_unparseable_rows = sum(
+                    len(df) for df in unparseable_data_map.values()
+                )
+                self.logger.info(
+                    f"Preserved {total_unparseable_rows} rows with unparseable dates in: {unparseable_file}"
+                )
 
             return 0
 
@@ -558,7 +586,7 @@ Output File Naming:
         selected_sheets: list[str],
         resolved_configs: dict[str, SheetConfig],
         args: SplitCommandArgs,
-    ) -> dict[str, SplitPeriodData]:
+    ) -> tuple[dict[str, SplitPeriodData], dict[str, pd.DataFrame]]:
         """Process splitting for all sheets.
 
         Args:
@@ -568,12 +596,14 @@ Output File Naming:
             args: Split command arguments
 
         Returns:
-            Dictionary mapping period_key to SplitPeriodData objects
+            Tuple of (period_data_map, unparseable_data_map)
         """
         self.logger.info("Starting date parsing and splitting process")
 
         # Collect all split data by time period
         period_data_map: dict[str, SplitPeriodData] = {}
+        # Collect unparseable data by sheet name
+        unparseable_data_map: dict[str, pd.DataFrame] = {}
 
         for sheet_name in selected_sheets:
             sheet_data = file_data[sheet_name]
@@ -589,13 +619,17 @@ Output File Naming:
                 )
 
             # Parse dates in the sheet
-            parsed_data = self._parse_dates_in_sheet(
+            parse_result = self._parse_dates_in_sheet(
                 sheet_data, config.date_column, config.date_format
             )
 
+            # Store unparseable data if any exists
+            if parse_result.unparseable_data is not None:
+                unparseable_data_map[sheet_name] = parse_result.unparseable_data
+
             # Split data by the specified interval
             split_groups = self._split_data_by_interval(
-                parsed_data,
+                parse_result.parsed_data,
                 config.date_column,
                 args.interval,
                 args.financial_year_start,
@@ -619,12 +653,12 @@ Output File Naming:
                 f"Sheet '{sheet_name}' prepared for {len(split_groups)} time periods"
             )
 
-        return period_data_map
+        return period_data_map, unparseable_data_map
 
     def _parse_dates_in_sheet(
         self, data: pd.DataFrame, date_column: str, date_format: str | None
-    ) -> pd.DataFrame:
-        """Parse dates in a sheet and return DataFrame with parsed date column.
+    ) -> UnparseableDataResult:
+        """Parse dates in a sheet and return both parsed and unparseable data.
 
         Args:
             data: Input DataFrame
@@ -632,10 +666,10 @@ Output File Naming:
             date_format: Optional date format string
 
         Returns:
-            DataFrame with parsed dates
+            UnparseableDataResult with parsed data and any unparseable rows
 
         Raises:
-            DataLoadError: If date parsing fails
+            DataLoadError: If date parsing fails completely
         """
         try:
             # Create a copy to avoid modifying original data
@@ -654,8 +688,13 @@ Output File Naming:
                     parsed_data[date_column], errors="coerce"
                 )
 
+            # Separate parsed and unparseable data
+            date_mask = parsed_data[date_column].notna()
+            valid_data = parsed_data[date_mask].copy()
+            unparseable_data = data[~date_mask].copy() if (~date_mask).any() else None
+
             # Check for parsing failures
-            null_dates = parsed_data[date_column].isna().sum()
+            null_dates = (~date_mask).sum()
             total_dates = len(parsed_data)
 
             if null_dates == total_dates:
@@ -666,17 +705,17 @@ Output File Naming:
 
             if null_dates > 0:
                 self.logger.warning(
-                    f"Failed to parse {null_dates} out of {total_dates} dates in column '{date_column}'"
+                    f"Failed to parse {null_dates} out of {total_dates} dates in column '{date_column}'. "
+                    f"These rows will be saved to a separate file."
                 )
-                # TODO: Add all unparseable dates to a separate DataFrame.
-                # Remove rows with unparseable dates
-                parsed_data = parsed_data.dropna(subset=[date_column])
 
             self.logger.info(
-                f"Successfully parsed {len(parsed_data)} dates in column '{date_column}'"
+                f"Successfully parsed {len(valid_data)} dates in column '{date_column}'"
             )
 
-            return parsed_data
+            return UnparseableDataResult(
+                parsed_data=valid_data, unparseable_data=unparseable_data
+            )
 
         except Exception as e:
             raise DataLoadError(
@@ -791,3 +830,91 @@ Output File Naming:
             )
 
         return output_files
+
+    def _generate_unparseable_filename(self, original_filename: str) -> str:
+        """Generate filename for unparseable data.
+
+        Args:
+            original_filename: Name of the original file
+
+        Returns:
+            Generated filename for unparseable data
+        """
+        original_path = Path(original_filename)
+        base_name = original_path.stem
+        extension = original_path.suffix
+
+        return f"{base_name}_unparseable_dates{extension}"
+
+    def _write_unparseable_data_file(
+        self,
+        unparseable_data_map: dict[str, pd.DataFrame],
+        file_manager: FileOutputManager,
+        original_filename: str,
+        selected_sheets: list[str],
+        all_file_data: dict[str, pd.DataFrame],
+    ) -> Path:
+        """Write unparseable data to a separate output file.
+
+        Args:
+            unparseable_data_map: Dictionary mapping sheet names to unparseable DataFrames
+            file_manager: FileOutputManager instance
+            original_filename: Name of the original file
+            selected_sheets: List of all sheets being processed
+            all_file_data: All sheet data from the original file
+
+        Returns:
+            Path to the written unparseable data file
+        """
+        # Generate filename for unparseable data
+        filename = self._generate_unparseable_filename(original_filename)
+
+        # Determine file format and content
+        original_path = Path(original_filename)
+        file_extension = original_path.suffix.lower()
+
+        if file_extension == ".csv" or len(selected_sheets) == 1:
+            # Write single sheet (CSV or single-sheet Excel)
+            sheet_name = next(iter(unparseable_data_map.keys()))
+            unparseable_df = unparseable_data_map[sheet_name]
+
+            output_path = file_manager.write_dataframe(
+                unparseable_df, filename, sheet_name
+            )
+            self.logger.info(
+                f"Written unparseable data for sheet '{sheet_name}': {len(unparseable_df)} rows"
+            )
+        else:
+            # Write multi-sheet Excel file
+            # Combine unparseable data with empty sheets for non-processed sheets
+            # while preserving original sheet order
+            sheet_data_for_unparseable = {}
+
+            # Iterate through all sheets in original order
+            for sheet_name, original_sheet_data in all_file_data.items():
+                if sheet_name in selected_sheets:
+                    if sheet_name in unparseable_data_map:
+                        # Use unparseable data for this sheet
+                        sheet_data_for_unparseable[sheet_name] = unparseable_data_map[
+                            sheet_name
+                        ]
+                    else:
+                        # Create empty DataFrame with same columns for sheets with no unparseable data
+                        empty_df = pd.DataFrame(columns=original_sheet_data.columns)
+                        sheet_data_for_unparseable[sheet_name] = empty_df
+                else:
+                    # Create empty DataFrame for non-selected sheets to maintain structure
+                    empty_df = pd.DataFrame(columns=original_sheet_data.columns)
+                    sheet_data_for_unparseable[sheet_name] = empty_df
+
+            output_path = file_manager.write_multiple_sheets(
+                sheet_data_for_unparseable, filename
+            )
+
+            # Log details about unparseable data by sheet
+            for sheet_name, df in unparseable_data_map.items():
+                self.logger.info(
+                    f"Written unparseable data for sheet '{sheet_name}': {len(df)} rows"
+                )
+
+        return output_path
